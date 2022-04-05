@@ -39,6 +39,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "arm7tdmi_disassembler"
+version = "0.1.0"
+dependencies = [
+ "modular-bitfield",
+]
+
+[[package]]
 name = "arrayvec"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

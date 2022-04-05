@@ -2,5 +2,6 @@
 resolver = "2"
 members = [
     "core",
-    "render"
+    "render",
+    "arm7tdmi_da",
 ]
