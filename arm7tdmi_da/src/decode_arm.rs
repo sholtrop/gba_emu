@@ -1,4 +1,5 @@
 use modular_bitfield::BitfieldSpecifier;
+use std::fmt::Display;
 
 /*
 package gba
@@ -129,6 +130,49 @@ pub enum Condition {
     Al = 0b1110, // Always - Instruction is always executed
 }
 
+impl Display for Condition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match &self {
+                Condition::Eq => "EQ",
+                Condition::Ne => "NE",
+                Condition::Cs => "CS",
+                Condition::Cc => "CC",
+                Condition::Mi => "MI",
+                Condition::Pl => "PL",
+                Condition::Vs => "VS",
+                Condition::Vc => "VC",
+                Condition::Hi => "HI",
+                Condition::Ls => "LS",
+                Condition::Ge => "GE",
+                Condition::Lt => "LT",
+                Condition::Gt => "GT",
+                Condition::Le => "LE",
+                Condition::Al => "AL",
+            }
+        )
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Register {
+    R0,
+}
+
+impl Display for Register {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match &self {
+                Register::R0 => "R0",
+            }
+        )
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Op {
     Adc, // Add with carry
@@ -168,10 +212,104 @@ pub enum Op {
     Unknown,
 }
 
+impl Display for Op {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match &self {
+                Op::Adc => "ADC",
+                Op::Add => "ADD",
+                Op::And => "AND",
+                Op::B => "B",
+                Op::Bic => "BIC",
+                Op::Bl => "BL",
+                Op::Bx => "BX",
+                Op::Cdp => "CDP",
+                Op::Cmn => "CMN",
+                Op::Cmp => "CMP",
+                Op::Eor => "EOR",
+                Op::Ldc => "LDC",
+                Op::Ldm => "LDM",
+                Op::Ldr => "LDR",
+                Op::Mcr => "MCR",
+                Op::Mla => "MLA",
+                Op::Mov => "MOV",
+                Op::Mrc => "MRC",
+                Op::Mrs => "MRS",
+                Op::Msr => "MSR",
+                Op::Mul => "MUL",
+                Op::Mvn => "MVN",
+                Op::Orr => "ORR",
+                Op::Rsb => "RSB",
+                Op::Rsc => "RSC",
+                Op::Sbc => "SBC",
+                Op::Stc => "STC",
+                Op::Stm => "STM",
+                Op::Str => "STR",
+                Op::Sub => "SUB",
+                Op::Swi => "SWI",
+                Op::Swp => "SWP",
+                Op::Teq => "TEQ",
+                Op::Tst => "TST",
+                Op::Unknown => "UNKNOWN",
+            }
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Operand {
+    Register(Register),
+    Immediate(u32),
+    None,
+}
+
+impl Display for Operand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match &self {
+                Operand::Register(r) => format!("R{}", r),
+                Operand::Immediate(i) => format!("#{}", i),
+                Operand::None => "".into(),
+            }
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Instruction {
     condition: Condition,
     op: Op,
+    operand1: Operand,
+    operand2: Operand,
+}
+
+impl Instruction {
+    pub fn new_no_operands(condition: Condition, op: Op) -> Instruction {
+        Instruction {
+            condition,
+            op,
+            operand1: Operand::None,
+            operand2: Operand::None,
+        }
+    }
+}
+
+impl Display for Instruction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (&self.operand1, &self.operand2) {
+            (Operand::None, Operand::None) => write!(f, "{}{}", self.op, self.condition),
+            (_, Operand::None) => write!(f, "{}{} {}", self.op, self.condition, self.operand1),
+            (_, _) => write!(
+                f,
+                "{}{} {}, {}",
+                self.op, self.condition, self.operand1, self.operand2
+            ),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -190,21 +328,14 @@ enum OpFormat {
     PsrTransferMsr,
     DataProcessing,
     Unimplemented,
-    Unknown,
 }
 
 pub struct Decoder {}
 
 impl Decoder {
     pub fn decode(instr: u32) -> Instruction {
-        let condition = Decoder::get_condition(instr);
-
-        let idx = Decoder::get_index(instr);
-
-        Instruction {
-            condition: Condition::Al,
-            op: Op::Unknown,
-        }
+        let format = Decoder::get_op_format(instr);
+        Decoder::get_instr(format, instr)
     }
 
     fn get_op_format(instr: u32) -> OpFormat {
@@ -239,6 +370,19 @@ impl Decoder {
         }
     }
 
+    fn get_instr(format: OpFormat, instr: u32) -> Instruction {
+        let condition = Decoder::get_condition(instr);
+        match format {
+            OpFormat::BranchAndBranchExchange => {
+                let link_bit = instr >> 24;
+                let op = if link_bit == 1 { Op::Bl } else { Op::B };
+                Instruction::new_no_operands(condition, op)
+            }
+            // OpFormat::SoftwareInterrupt => Op::Swi,
+            _ => todo!("{:?}", format),
+        }
+    }
+
     /// Get the condition field of the ARM instruction
     fn get_condition(instr: u32) -> Condition {
         let cond_bits: u8 = (instr >> (INSTR_SIZE - COND_SIZE)).try_into().unwrap();
@@ -247,6 +391,7 @@ impl Decoder {
     }
 
     #[inline]
+    #[allow(dead_code)]
     /// Return the 12 bit index for the [DecoderTable]:
     /// ```
     /// |   28    24    20    16    12     8     4     0
