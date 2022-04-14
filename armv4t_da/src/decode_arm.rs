@@ -262,7 +262,6 @@ impl Display for Op {
 enum Operand {
     Register(Register),
     Immediate(u32),
-    None,
 }
 
 impl Display for Operand {
@@ -273,7 +272,6 @@ impl Display for Operand {
             match &self {
                 Operand::Register(r) => format!("R{}", r),
                 Operand::Immediate(i) => format!("#{}", i),
-                Operand::None => "".into(),
             }
         )
     }
@@ -283,8 +281,8 @@ impl Display for Operand {
 pub struct Instruction {
     condition: Condition,
     op: Op,
-    operand1: Operand,
-    operand2: Operand,
+    operand1: Option<Operand>,
+    operand2: Option<Operand>,
 }
 
 impl Instruction {
@@ -292,8 +290,8 @@ impl Instruction {
         Instruction {
             condition,
             op,
-            operand1: Operand::None,
-            operand2: Operand::None,
+            operand1: None,
+            operand2: None,
         }
     }
 }
@@ -301,13 +299,10 @@ impl Instruction {
 impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match (&self.operand1, &self.operand2) {
-            (Operand::None, Operand::None) => write!(f, "{}{}", self.op, self.condition),
-            (_, Operand::None) => write!(f, "{}{} {}", self.op, self.condition, self.operand1),
-            (_, _) => write!(
-                f,
-                "{}{} {}, {}",
-                self.op, self.condition, self.operand1, self.operand2
-            ),
+            (None, None) => write!(f, "{}{}", self.op, self.condition),
+            (Some(op1), None) => write!(f, "{}{} {}", self.op, self.condition, op1),
+            (Some(op1), Some(op2)) => write!(f, "{}{} {}, {}", self.op, self.condition, op1, op2),
+            _ => unreachable!("Operand2 was `Some` but operand1 was `None`"),
         }
     }
 }
@@ -378,7 +373,15 @@ impl Decoder {
                 let op = if link_bit == 1 { Op::Bl } else { Op::B };
                 Instruction::new_no_operands(condition, op)
             }
-            // OpFormat::SoftwareInterrupt => Op::Swi,
+            OpFormat::SoftwareInterrupt => {
+                let comment_field = instr & ((1 << 24) - 1);
+                Instruction {
+                    condition,
+                    op: Op::Swi,
+                    operand1: Some(Operand::Immediate(comment_field)),
+                    operand2: None,
+                }
+            }
             _ => todo!("{:?}", format),
         }
     }
@@ -405,13 +408,13 @@ impl Decoder {
     }
 
     fn is_branch_and_branch_exchange(instr: u32) -> bool {
-        let branchAndExchangeFormat = 0b0000_0001_0010_1111_1111_1111_0001_0000;
+        let branch_and_exchange_format = 0b0000_0001_0010_1111_1111_1111_0001_0000;
 
         let format_mask = 0b0000_1111_1111_1111_1111_1111_1111_0000;
 
         let extracted_format = instr & format_mask;
 
-        extracted_format == branchAndExchangeFormat
+        extracted_format == branch_and_exchange_format
     }
 
     fn is_block_data_transfer(instr: u32) -> bool {
