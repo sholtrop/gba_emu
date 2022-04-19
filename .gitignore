@@ -1,2 +1,4 @@
 target/
 *.gba
+*.html
+*.htm

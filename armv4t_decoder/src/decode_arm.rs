@@ -175,8 +175,18 @@ impl Display for Register {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Op {
-    Adc, // Add with carry
-    Add, // Add
+    // Add with carry
+    Adc {
+        op1: Register,
+        op2: Operand,
+        dst: Register,
+    },
+    // Add
+    Add {
+        op1: Register,
+        op2: Operand,
+        dst: Register,
+    },
     And, // And
     B,   // Branch
     Bic, // Bit clear
@@ -205,7 +215,11 @@ pub enum Op {
     Stm, // Store multiple
     Str, // Store register to memory
     Sub, // Subtract
-    Swi, // Software interrupt
+
+    // Software interrupt
+    Swi {
+        comment_field: Immediate,
+    },
     Swp, // Swap register with memory
     Teq, // Test bitwise equality
     Tst, // Test bits
@@ -218,8 +232,8 @@ impl Display for Op {
             f,
             "{}",
             match &self {
-                Op::Adc => "ADC",
-                Op::Add => "ADD",
+                Op::Adc { .. } => "ADC",
+                Op::Add { .. } => "ADD",
                 Op::And => "AND",
                 Op::B => "B",
                 Op::Bic => "BIC",
@@ -248,7 +262,7 @@ impl Display for Op {
                 Op::Stm => "STM",
                 Op::Str => "STR",
                 Op::Sub => "SUB",
-                Op::Swi => "SWI",
+                Op::Swi { .. } => "SWI",
                 Op::Swp => "SWP",
                 Op::Teq => "TEQ",
                 Op::Tst => "TST",
@@ -258,10 +272,25 @@ impl Display for Op {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Immediate(u32);
+
+impl Display for Immediate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<u32> for Immediate {
+    fn from(n: u32) -> Self {
+        Self(n)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Operand {
+pub enum Operand {
     Register(Register),
-    Immediate(u32),
+    Immediate(Immediate),
 }
 
 impl Display for Operand {
@@ -277,32 +306,47 @@ impl Display for Operand {
     }
 }
 
+impl From<Register> for Operand {
+    fn from(r: Register) -> Self {
+        Self::Register(r)
+    }
+}
+
+impl From<Immediate> for Operand {
+    fn from(i: Immediate) -> Self {
+        Self::Immediate(i)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Instruction {
     condition: Condition,
     op: Op,
-    operand1: Option<Operand>,
-    operand2: Option<Operand>,
+    // operand1: Option<Operand>,
+    // operand2: Option<Operand>,
 }
 
 impl Instruction {
-    pub fn new_no_operands(condition: Condition, op: Op) -> Instruction {
-        Instruction {
-            condition,
-            op,
-            operand1: None,
-            operand2: None,
+    pub fn get_operands(&self) -> (Option<Operand>, Option<Operand>, Option<Operand>) {
+        match self.op {
+            Op::Adc { dst, op1, op2 } => (Some(dst.into()), Some(op1.into()), Some(op2)),
+            _ => (None, None, None),
         }
     }
 }
 
 impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match (&self.operand1, &self.operand2) {
-            (None, None) => write!(f, "{}{}", self.op, self.condition),
-            (Some(op1), None) => write!(f, "{}{} {}", self.op, self.condition, op1),
-            (Some(op1), Some(op2)) => write!(f, "{}{} {}, {}", self.op, self.condition, op1, op2),
-            _ => unreachable!("Operand2 was `Some` but operand1 was `None`"),
+        match self.get_operands() {
+            (None, None, None) => write!(f, "{}{}", self.op, self.condition),
+            (Some(op1), None, None) => write!(f, "{}{} {}", self.op, self.condition, op1),
+            (Some(op1), Some(op2), None) => {
+                write!(f, "{}{} {}, {}", self.op, self.condition, op1, op2)
+            }
+            (Some(op1), Some(op2), Some(op3)) => {
+                write!(f, "{}{} {}, {}, {}", self.op, self.condition, op1, op2, op3)
+            }
+            _ => unreachable!("A previous Operand was `None`"),
         }
     }
 }
@@ -371,15 +415,13 @@ impl Decoder {
             OpFormat::BranchAndBranchExchange => {
                 let link_bit = instr >> 24;
                 let op = if link_bit == 1 { Op::Bl } else { Op::B };
-                Instruction::new_no_operands(condition, op)
+                Instruction { condition, op }
             }
             OpFormat::SoftwareInterrupt => {
-                let comment_field = instr & ((1 << 24) - 1);
+                let comment_field = (instr & ((1 << 24) - 1)).into();
                 Instruction {
                     condition,
-                    op: Op::Swi,
-                    operand1: Some(Operand::Immediate(comment_field)),
-                    operand2: None,
+                    op: Op::Swi { comment_field },
                 }
             }
             _ => todo!("{:?}", format),
@@ -548,12 +590,32 @@ mod tests {
     #[test]
     fn swi_decode() {
         // SWINE 0
-        assert_eq!(Decoder::decode(0x1F000000).op, Op::Swi);
+        assert_eq!(
+            Decoder::decode(0x1F000000).op,
+            Op::Swi {
+                comment_field: Immediate(0)
+            }
+        );
         // SWILE 0
-        assert_eq!(Decoder::decode(0xDF000000).op, Op::Swi);
+        assert_eq!(
+            Decoder::decode(0xDF000000).op,
+            Op::Swi {
+                comment_field: Immediate(0)
+            }
+        );
         // SWIVC 0
-        assert_eq!(Decoder::decode(0x7F000000).op, Op::Swi);
-        // SWIGE 0
-        assert_eq!(Decoder::decode(0xAFFFFFFF).op, Op::Swi);
+        assert_eq!(
+            Decoder::decode(0x7F000000).op,
+            Op::Swi {
+                comment_field: Immediate(0)
+            }
+        );
+        // SWIGE 0xFFFFFF
+        assert_eq!(
+            Decoder::decode(0xAFFFFFFF).op,
+            Op::Swi {
+                comment_field: Immediate(0xFFFFFF)
+            }
+        );
     }
 }

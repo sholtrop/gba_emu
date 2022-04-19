@@ -1,6 +1,10 @@
 use std::fs;
 use std::path::Path;
 
+const CARTRIDGE_HEADER_START: usize = 0x0100;
+const CARTRIDGE_HEADER_END: usize = 0x014F;
+const CARTRIDGE_CODE_START: usize = 0x08000000;
+
 pub struct Cartridge {
     blob: Vec<u8>,
 }
@@ -23,6 +27,14 @@ impl Cartridge {
             bytes
         };
         String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    pub fn header(&self) -> &[u8] {
+        &self.blob[CARTRIDGE_HEADER_START..CARTRIDGE_HEADER_END]
+    }
+
+    pub fn game_instructions(&self) -> &[u8] {
+        self.read_bytes(CARTRIDGE_CODE_START, 1)
     }
 
     fn read_bytes(&self, start: usize, amount: usize) -> &[u8] {

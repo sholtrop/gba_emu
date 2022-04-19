@@ -3,5 +3,5 @@ resolver = "2"
 members = [
     "core",
     "render",
-    "armv4t_da",
+    "armv4t_decoder",
 ]
