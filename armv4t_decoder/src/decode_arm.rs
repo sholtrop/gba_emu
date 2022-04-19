@@ -174,6 +174,60 @@ impl Display for Register {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Signedness {
+    Signed,
+    Unsigned,
+}
+
+use Signedness::*;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Accumulate {
+    MultiplyOnly,
+    MultiplyAndAccumulate,
+}
+
+use Accumulate::*;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SetConditionCodes {
+    Set,
+    DontSet,
+}
+
+impl Display for SetConditionCodes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Set => "S",
+                Self::DontSet => "",
+            }
+        )
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ByteOrWord {
+    Byte,
+    Word,
+}
+
+impl Display for ByteOrWord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Byte => "B",
+                Self::Word => "",
+            }
+        )
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Op {
     // Add with carry
     Adc {
@@ -187,7 +241,8 @@ pub enum Op {
         op2: Operand,
         dst: Register,
     },
-    And, // And
+    // Logical AND
+    And,
     B,   // Branch
     Bic, // Bit clear
     Bl,  // Branch with link
@@ -200,12 +255,28 @@ pub enum Op {
     Ldm, // Load multiple regisers
     Ldr, // Load register from memory
     Mcr, // Move CPU register to coprocessor register
-    Mla, // Multiply Accumulate
     Mov, // Move register or constant
     Mrc, // Move from coprocessor register to CPU register
     Mrs, // Move PSR status/flags to register
     Msr, // Move register to PSR status/flags
-    Mul, // Multiply
+
+    // Multiply
+    Mul {
+        accumulate: Accumulate,
+        set_condition: SetConditionCodes,
+        op1: Register,
+        op2: Register,
+    },
+    // Multiply long
+    Mull {
+        sign: Signedness,
+        accumulate: Accumulate,
+        set_condition: SetConditionCodes,
+        dest_low: Register,
+        dest_high: Register,
+        op1: Register,
+        op2: Register,
+    },
     Mvn, // Move negative register
     Orr, // Or
     Rsb, // Reverse subtract
@@ -220,7 +291,13 @@ pub enum Op {
     Swi {
         comment_field: Immediate,
     },
-    Swp, // Swap register with memory
+    // Swap register with memory
+    Swp {
+        src: Register,
+        dst: Register,
+        base: Register,
+        size: ByteOrWord,
+    },
     Teq, // Test bitwise equality
     Tst, // Test bits
     Unknown,
@@ -247,12 +324,26 @@ impl Display for Op {
                 Op::Ldm => "LDM",
                 Op::Ldr => "LDR",
                 Op::Mcr => "MCR",
-                Op::Mla => "MLA",
                 Op::Mov => "MOV",
                 Op::Mrc => "MRC",
                 Op::Mrs => "MRS",
                 Op::Msr => "MSR",
-                Op::Mul => "MUL",
+                Op::Mul { accumulate, .. } => {
+                    match accumulate {
+                        MultiplyOnly => "MUL",
+                        MultiplyAndAccumulate => "MULA",
+                    }
+                }
+                Op::Mull {
+                    sign, accumulate, ..
+                } => {
+                    match (sign, accumulate) {
+                        (Signed, MultiplyOnly) => "SMULL",
+                        (Unsigned, MultiplyOnly) => "UMULL",
+                        (Signed, MultiplyAndAccumulate) => "SMLAL",
+                        (Unsigned, MultiplyAndAccumulate) => "UMLAL",
+                    }
+                }
                 Op::Mvn => "MVN",
                 Op::Orr => "ORR",
                 Op::Rsb => "RSB",
@@ -263,7 +354,7 @@ impl Display for Op {
                 Op::Str => "STR",
                 Op::Sub => "SUB",
                 Op::Swi { .. } => "SWI",
-                Op::Swp => "SWP",
+                Op::Swp { .. } => "SWP",
                 Op::Teq => "TEQ",
                 Op::Tst => "TST",
                 Op::Unknown => "UNKNOWN",
@@ -322,29 +413,80 @@ impl From<Immediate> for Operand {
 pub struct Instruction {
     condition: Condition,
     op: Op,
-    // operand1: Option<Operand>,
-    // operand2: Option<Operand>,
 }
 
 impl Instruction {
-    pub fn get_operands(&self) -> (Option<Operand>, Option<Operand>, Option<Operand>) {
+    pub fn get_operands(
+        &self,
+    ) -> (
+        Option<Operand>,
+        Option<Operand>,
+        Option<Operand>,
+        Option<Operand>,
+    ) {
         match self.op {
-            Op::Adc { dst, op1, op2 } => (Some(dst.into()), Some(op1.into()), Some(op2)),
-            _ => (None, None, None),
+            Op::Adc { dst, op1, op2 } => (Some(dst.into()), Some(op1.into()), Some(op2), None),
+            Op::Add { dst, op1, op2 } => (Some(dst.into()), Some(op1.into()), Some(op2), None),
+            Op::Mull {
+                dest_low,
+                dest_high,
+                op1,
+                op2,
+                ..
+            } => (
+                Some(dest_low.into()),
+                Some(dest_high.into()),
+                Some(op1.into()),
+                Some(op2.into()),
+            ),
+            Op::Swp { src, dst, base, .. } => {
+                (Some(dst.into()), Some(src.into()), Some(base.into()), None)
+            }
+            Op::Swi { comment_field } => (Some(comment_field.into()), None, None, None),
+            _ => (None, None, None, None),
         }
     }
 }
 
 impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.get_operands() {
-            (None, None, None) => write!(f, "{}{}", self.op, self.condition),
-            (Some(op1), None, None) => write!(f, "{}{} {}", self.op, self.condition, op1),
-            (Some(op1), Some(op2), None) => {
-                write!(f, "{}{} {}, {}", self.op, self.condition, op1, op2)
+        // Certain instructions can add an extra letter to the mnemonic.
+        // E.g. MUL can become MULEQS with condition code EQ and set_condition=true
+        let extra_letter = match self.op {
+            Op::Swp { size, .. } => size.to_string(),
+            Op::Mul { set_condition, .. } | Op::Mull { set_condition, .. } => {
+                set_condition.to_string()
             }
-            (Some(op1), Some(op2), Some(op3)) => {
-                write!(f, "{}{} {}, {}, {}", self.op, self.condition, op1, op2, op3)
+            _ => "".into(),
+        };
+
+        match self.get_operands() {
+            (None, None, None, None) => {
+                write!(f, "{}{}{}", self.op, self.condition, extra_letter)
+            }
+            (Some(op1), None, None, None) => {
+                write!(f, "{}{}{} {}", self.op, self.condition, extra_letter, op1)
+            }
+            (Some(op1), Some(op2), None, None) => {
+                write!(
+                    f,
+                    "{}{}{} {},{}",
+                    self.op, self.condition, extra_letter, op1, op2
+                )
+            }
+            (Some(op1), Some(op2), Some(op3), None) => {
+                write!(
+                    f,
+                    "{}{}{} {},{},{}",
+                    self.op, self.condition, extra_letter, op1, op2, op3
+                )
+            }
+            (Some(op1), Some(op2), Some(op3), Some(op4)) => {
+                write!(
+                    f,
+                    "{}{}{} {},{},{},{}",
+                    self.op, self.condition, extra_letter, op1, op2, op3, op4
+                )
             }
             _ => unreachable!("A previous Operand was `None`"),
         }
@@ -435,19 +577,19 @@ impl Decoder {
             .unwrap_or_else(|e| panic!("Invalid bit pattern for ARM condition: {e}"))
     }
 
-    #[inline]
-    #[allow(dead_code)]
-    /// Return the 12 bit index for the [DecoderTable]:
-    /// ```
-    /// |   28    24    20    16    12     8     4     0
-    /// |-----|-----|-----|-----|-----|-----|-----|-----|
-    /// |1111 |1111 |1111 |1111 |1111 |1111 |1111 |1111 |
-    /// |-----|-----|-----|-----|-----|-----|-----|-----|
-    /// |     |BA98 |7654 |     |     |3210 |     |     |
-    /// ```
-    fn get_index(instr: u32) -> usize {
-        ((instr >> 16) & 0xFF0 | ((instr >> 4) & 0x00F)) as usize
-    }
+    // #[inline]
+    // #[allow(dead_code)]
+    // /// Return the 12 bit index for the [DecoderTable]:
+    // /// ```
+    // /// |   28    24    20    16    12     8     4     0
+    // /// |-----|-----|-----|-----|-----|-----|-----|-----|
+    // /// |1111 |1111 |1111 |1111 |1111 |1111 |1111 |1111 |
+    // /// |-----|-----|-----|-----|-----|-----|-----|-----|
+    // /// |     |BA98 |7654 |     |     |3210 |     |     |
+    // /// ```
+    // fn get_index(instr: u32) -> usize {
+    //     ((instr >> 16) & 0xFF0 | ((instr >> 4) & 0x00F)) as usize
+    // }
 
     fn is_branch_and_branch_exchange(instr: u32) -> bool {
         let branch_and_exchange_format = 0b0000_0001_0010_1111_1111_1111_0001_0000;
