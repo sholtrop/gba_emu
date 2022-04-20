@@ -1,4 +1,4 @@
-use modular_bitfield::BitfieldSpecifier;
+use modular_bitfield::{bitfield, specifiers::*, BitfieldSpecifier};
 use std::fmt::Display;
 
 /*
@@ -156,18 +156,108 @@ impl Display for Condition {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Register {
-    R0,
+#[derive(BitfieldSpecifier, Clone, Copy, PartialEq, Eq, Debug)]
+#[bits = 2]
+pub enum ShiftType {
+    LogicalLeft = 0b00,
+    LogicalRight = 0b01,
+    ArithmeticRight = 0b10,
+    RotateRight = 0b11,
 }
 
-impl Display for Register {
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ShiftSource {
+    Amount(u8),
+    Register(RegisterName),
+}
+
+impl From<u16> for ShiftSource {
+    fn from(n: u16) -> Self {
+        if ((n >> 4) & 1) == 1 {
+            Self::Register(RegisterName::from((n >> 8) & 0b1111))
+        } else {
+            Self::Amount(((n >> 7) & 0b11111) as u8)
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ShiftRegister {
+    name: RegisterName,
+    shift: (ShiftSource, ShiftType, u8),
+}
+
+impl Display for ShiftRegister {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} [{:#?}]", self.name, self.shift)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RegisterName {
+    R0,
+    R1,
+    R2,
+    R3,
+    R4,
+    R5,
+    R6,
+    R7,
+    R8,
+    R9,
+    R10,
+    R11,
+    R12,
+    R13,
+    R14,
+}
+
+use RegisterName::*;
+
+impl From<u16> for RegisterName {
+    fn from(n: u16) -> Self {
+        match n {
+            0 => R0,
+            1 => R1,
+            2 => R2,
+            3 => R3,
+            4 => R4,
+            5 => R5,
+            6 => R6,
+            7 => R7,
+            8 => R8,
+            9 => R9,
+            10 => R10,
+            11 => R11,
+            12 => R12,
+            13 => R13,
+            14 => R14,
+            _ => panic!("Invalid register number {}", n),
+        }
+    }
+}
+
+impl Display for RegisterName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}",
+            "R{}",
             match &self {
-                Register::R0 => "R0",
+                RegisterName::R0 => "0",
+                RegisterName::R1 => "1",
+                RegisterName::R2 => "2",
+                RegisterName::R3 => "3",
+                RegisterName::R4 => "4",
+                RegisterName::R5 => "5",
+                RegisterName::R6 => "6",
+                RegisterName::R7 => "7",
+                RegisterName::R8 => "8",
+                RegisterName::R9 => "9",
+                RegisterName::R10 => "10",
+                RegisterName::R11 => "11",
+                RegisterName::R12 => "12",
+                RegisterName::R13 => "13",
+                RegisterName::R14 => "14",
             }
         )
     }
@@ -231,15 +321,15 @@ impl Display for ByteOrWord {
 pub enum Op {
     // Add with carry
     Adc {
-        op1: Register,
+        op1: RegisterName,
         op2: Operand,
-        dst: Register,
+        dst: RegisterName,
     },
     // Add
     Add {
-        op1: Register,
+        op1: RegisterName,
         op2: Operand,
-        dst: Register,
+        dst: RegisterName,
     },
     // Logical AND
     And,
@@ -264,18 +354,18 @@ pub enum Op {
     Mul {
         accumulate: Accumulate,
         set_condition: SetConditionCodes,
-        op1: Register,
-        op2: Register,
+        op1: RegisterName,
+        op2: RegisterName,
     },
     // Multiply long
     Mull {
         sign: Signedness,
         accumulate: Accumulate,
         set_condition: SetConditionCodes,
-        dest_low: Register,
-        dest_high: Register,
-        op1: Register,
-        op2: Register,
+        dest_low: RegisterName,
+        dest_high: RegisterName,
+        op1: RegisterName,
+        op2: RegisterName,
     },
     Mvn, // Move negative register
     Orr, // Or
@@ -293,9 +383,9 @@ pub enum Op {
     },
     // Swap register with memory
     Swp {
-        src: Register,
-        dst: Register,
-        base: Register,
+        src: RegisterName,
+        dst: RegisterName,
+        base: RegisterName,
         size: ByteOrWord,
     },
     Teq, // Test bitwise equality
@@ -378,9 +468,39 @@ impl From<u32> for Immediate {
     }
 }
 
+#[derive(Clone, Copy)]
+#[bitfield(bits = 12)]
+pub struct RotatedImmediate {
+    value: B8,  // To be zero-extended to 32 bits
+    rotate: B4, // Twice this amount is applied to `value`
+}
+
+impl RotatedImmediate {
+    pub fn imm_value(&self) -> u32 {
+        let value = self.value() as u32;
+        value.rotate_right(value * 2)
+    }
+}
+
+impl core::fmt::Debug for RotatedImmediate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:b}{:b}", self.value(), self.rotate())
+    }
+}
+
+impl PartialEq for RotatedImmediate {
+    fn eq(&self, other: &Self) -> bool {
+        self.value() == other.value() && self.rotate() == other.rotate()
+    }
+}
+
+impl Eq for RotatedImmediate {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operand {
-    Register(Register),
+    RotatedImmediate(RotatedImmediate),
+    ShiftRegister(ShiftRegister),
+    Register(RegisterName),
     Immediate(Immediate),
 }
 
@@ -392,20 +512,34 @@ impl Display for Operand {
             match &self {
                 Operand::Register(r) => format!("R{}", r),
                 Operand::Immediate(i) => format!("#{}", i),
+                Operand::ShiftRegister(ShiftRegister { name, .. }) => format!("R{}", name),
+                Operand::RotatedImmediate(ri) => format!("#{}", ri.imm_value()),
             }
         )
     }
 }
 
-impl From<Register> for Operand {
-    fn from(r: Register) -> Self {
-        Self::Register(r)
+impl From<RotatedImmediate> for Operand {
+    fn from(ri: RotatedImmediate) -> Self {
+        Operand::RotatedImmediate(ri)
+    }
+}
+
+impl From<RegisterName> for Operand {
+    fn from(name: RegisterName) -> Self {
+        Self::Register(name)
     }
 }
 
 impl From<Immediate> for Operand {
     fn from(i: Immediate) -> Self {
         Self::Immediate(i)
+    }
+}
+
+impl From<ShiftRegister> for Operand {
+    fn from(sr: ShiftRegister) -> Self {
+        Self::ShiftRegister(sr)
     }
 }
 
@@ -507,7 +641,7 @@ enum OpFormat {
     Multiply,
     PsrTransferMrs,
     PsrTransferMsr,
-    DataProcessing,
+    DataProcessing, // ALU instructions
     Unimplemented,
 }
 
@@ -566,7 +700,60 @@ impl Decoder {
                     op: Op::Swi { comment_field },
                 }
             }
+            OpFormat::DataProcessing => {
+                let op = Decoder::get_data_processing_op(instr);
+                Instruction { condition, op }
+            }
             _ => todo!("{:?}", format),
+        }
+    }
+
+    fn get_data_processing_op(instr: u32) -> Op {
+        let opcode = (instr >> 21) & 0b1111;
+        match opcode {
+            0b0000 => Op::And,
+            0b0001 => Op::Eor,
+            0b0010 => Op::Sub,
+            0b0011 => Op::Rsb,
+            0b0100 | 0b0101 => {
+                let op1 = ((instr >> 16) & 0b1111) as u16;
+                let op1 = RegisterName::from(op1);
+
+                let op2 = (instr & ((1 << 12) - 1)) as u16;
+                let is_immediate = (instr << 25 & 1) == 1;
+                let op2 = if is_immediate {
+                    let rot_imm = RotatedImmediate::from_bytes(op2.to_ne_bytes());
+                    Operand::RotatedImmediate(rot_imm)
+                } else {
+                    let shift_type = ShiftType::from_bytes(((op2 >> 5) & 0b11) as u8).unwrap();
+                    let shift_amount = ((op2 >> 7) & 0b11111) as u8;
+                    let reg = op2 & 0b1111;
+                    let op2 = ShiftRegister {
+                        name: reg.into(),
+                        shift: (ShiftSource::from(op2), shift_type, shift_amount),
+                    };
+                    Operand::ShiftRegister(op2)
+                };
+
+                let dst = ((instr >> 12) & 0b1111) as u16;
+                let dst = RegisterName::from(dst);
+                if opcode == 0b0100 {
+                    Op::Add { op1, op2, dst }
+                } else {
+                    Op::Adc { op1, op2, dst }
+                }
+            }
+            0b0110 => Op::Sbc,
+            0b0111 => Op::Rsc,
+            0b1000 => Op::Tst,
+            0b1001 => Op::Teq,
+            0b1010 => Op::Cmp,
+            0b1011 => Op::Cmn,
+            0b1100 => Op::Orr,
+            0b1101 => Op::Mov,
+            0b1110 => Op::Bic,
+            0b1111 => Op::Mvn,
+            _ => panic!("Opcode {opcode} invalid for data processing format"),
         }
     }
 
