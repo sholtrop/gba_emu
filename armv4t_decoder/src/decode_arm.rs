@@ -476,6 +476,12 @@ pub struct RotatedImmediate {
 }
 
 impl RotatedImmediate {
+    pub const fn new_imm(value: u8, rotate: u8) -> Self {
+        Self {
+            bytes: [value, rotate << 4],
+        }
+    }
+
     pub fn imm_value(&self) -> u32 {
         let value = self.value() as u32;
         value.rotate_right(value * 2)
@@ -484,7 +490,7 @@ impl RotatedImmediate {
 
 impl core::fmt::Debug for RotatedImmediate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:b}{:b}", self.value(), self.rotate())
+        write!(f, "{} rot:{:b}", self.value(), self.rotate())
     }
 }
 
@@ -720,7 +726,7 @@ impl Decoder {
                 let op1 = RegisterName::from(op1);
 
                 let op2 = (instr & ((1 << 12) - 1)) as u16;
-                let is_immediate = (instr << 25 & 1) == 1;
+                let is_immediate = ((instr >> 25) & 1) == 1;
                 let op2 = if is_immediate {
                     let rot_imm = RotatedImmediate::from_bytes(op2.to_ne_bytes());
                     Operand::RotatedImmediate(rot_imm)
@@ -916,35 +922,60 @@ impl Decoder {
 mod tests {
     use super::*;
 
+    // Instruction hex -> expectation mapping
+    const TEST_INSTRUCTIONS: [(u32, Instruction); 1] = [(
+        0xe2833001, // 	add	r3, r3, #1
+        Instruction {
+            condition: Condition::Al,
+            op: Op::Add {
+                op1: R3,
+                op2: Operand::RotatedImmediate(RotatedImmediate::new_imm(1, 0)),
+                dst: R3,
+            },
+        },
+    )];
+
     #[test]
-    fn swi_decode() {
-        // SWINE 0
-        assert_eq!(
-            Decoder::decode(0x1F000000).op,
-            Op::Swi {
-                comment_field: Immediate(0)
-            }
-        );
-        // SWILE 0
-        assert_eq!(
-            Decoder::decode(0xDF000000).op,
-            Op::Swi {
-                comment_field: Immediate(0)
-            }
-        );
-        // SWIVC 0
-        assert_eq!(
-            Decoder::decode(0x7F000000).op,
-            Op::Swi {
-                comment_field: Immediate(0)
-            }
-        );
-        // SWIGE 0xFFFFFF
-        assert_eq!(
-            Decoder::decode(0xAFFFFFFF).op,
-            Op::Swi {
-                comment_field: Immediate(0xFFFFFF)
-            }
-        );
+    fn decode_instructions_test() {
+        for (instr, expect_decoded) in TEST_INSTRUCTIONS.into_iter() {
+            let actual_decoded = Decoder::decode(instr);
+            assert_eq!(
+                expect_decoded, actual_decoded,
+                "\nEXPECTED:\n{:#?}\n\nACTUAL:\n{:#?}",
+                expect_decoded, actual_decoded
+            );
+        }
     }
+
+    // #[test]
+    // fn swi_decode() {
+    //     // SWINE 0
+    //     assert_eq!(
+    //         Decoder::decode(0x1F000000).op,
+    //         Op::Swi {
+    //             comment_field: Immediate(0)
+    //         }
+    //     );
+    //     // SWILE 0
+    //     assert_eq!(
+    //         Decoder::decode(0xDF000000).op,
+    //         Op::Swi {
+    //             comment_field: Immediate(0)
+    //         }
+    //     );
+    //     // SWIVC 0
+    //     assert_eq!(
+    //         Decoder::decode(0x7F000000).op,
+    //         Op::Swi {
+    //             comment_field: Immediate(0)
+    //         }
+    //     );
+    //     // SWIGE 0xFFFFFF
+    //     assert_eq!(
+    //         Decoder::decode(0xAFFFFFFF).op,
+    //         Op::Swi {
+    //             comment_field: Immediate(0xFFFFFF)
+    //         }
+    //     );
+    // }
 }

@@ -1,0 +1,1 @@
+arm-none-eabi-objdump -s -C -j .text -d $1 &> $1.dump
