@@ -136,21 +136,21 @@ impl Display for Condition {
             f,
             "{}",
             match &self {
-                Condition::Eq => "EQ",
-                Condition::Ne => "NE",
-                Condition::Cs => "CS",
-                Condition::Cc => "CC",
-                Condition::Mi => "MI",
-                Condition::Pl => "PL",
-                Condition::Vs => "VS",
-                Condition::Vc => "VC",
-                Condition::Hi => "HI",
-                Condition::Ls => "LS",
-                Condition::Ge => "GE",
-                Condition::Lt => "LT",
-                Condition::Gt => "GT",
-                Condition::Le => "LE",
-                Condition::Al => "AL",
+                Condition::Eq => "eq",
+                Condition::Ne => "ne",
+                Condition::Cs => "cs",
+                Condition::Cc => "cc",
+                Condition::Mi => "mi",
+                Condition::Pl => "pl",
+                Condition::Vs => "vs",
+                Condition::Vc => "vc",
+                Condition::Hi => "hi",
+                Condition::Ls => "ls",
+                Condition::Ge => "ge",
+                Condition::Lt => "lt",
+                Condition::Gt => "gt",
+                Condition::Le => "le",
+                Condition::Al => "",
             }
         )
     }
@@ -241,7 +241,7 @@ impl Display for RegisterName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "R{}",
+            "r{}",
             match &self {
                 RegisterName::R0 => "0",
                 RegisterName::R1 => "1",
@@ -291,7 +291,7 @@ impl Display for SetConditionCodes {
             f,
             "{}",
             match self {
-                Self::Set => "S",
+                Self::Set => "s",
                 Self::DontSet => "",
             }
         )
@@ -310,7 +310,7 @@ impl Display for ByteOrWord {
             f,
             "{}",
             match self {
-                Self::Byte => "B",
+                Self::Byte => "b",
                 Self::Word => "",
             }
         )
@@ -356,7 +356,7 @@ impl DataOp {
     pub fn get_operands(&self) -> (String, Option<String>, String) {
         (
             self.operands.dst.to_string(),
-            self.operands.op1.and_then(|o| Some(o.to_string())),
+            self.operands.op1.map(|o| o.to_string()),
             self.operands.op2.to_string(),
         )
     }
@@ -417,57 +417,57 @@ impl Display for Op {
             "{}",
             match &self {
                 Op::Data(DataOp { opcode, .. }) => match opcode {
-                    Adc => "ADC",
-                    Add => "ADD",
-                    And => "AND",
-                    Cmn => "CMN",
-                    Cmp => "CMP",
-                    Eor => "EOR",
-                    Mov => "MOV",
-                    Rsb => "RSB",
-                    Rsc => "RSC",
-                    Sbc => "SBC",
-                    Sub => "SUB",
-                    Orr => "ORR",
-                    Teq => "TEQ",
-                    Tst => "TST",
-                    Bic => "BIC",
-                    Mvn => "MVN",
+                    Adc => "adc",
+                    Add => "add",
+                    And => "and",
+                    Cmn => "cmn",
+                    Cmp => "cmp",
+                    Eor => "eor",
+                    Mov => "mov",
+                    Rsb => "rsb",
+                    Rsc => "rsc",
+                    Sbc => "sbc",
+                    Sub => "sub",
+                    Orr => "orr",
+                    Teq => "teq",
+                    Tst => "tst",
+                    Bic => "bic",
+                    Mvn => "mvn",
                 },
-                Op::B => "B",
-                Op::Bl => "BL",
-                Op::Bx => "BX",
-                Op::Cdp => "CDP",
-                Op::Ldc => "LDC",
-                Op::Ldm => "LDM",
-                Op::Ldr => "LDR",
-                Op::Mcr => "MCR",
-                Op::Mrc => "MRC",
-                Op::Mrs => "MRS",
-                Op::Msr => "MSR",
+                Op::B => "b",
+                Op::Bl => "bl",
+                Op::Bx => "bx",
+                Op::Cdp => "cdp",
+                Op::Ldc => "ldc",
+                Op::Ldm => "ldm",
+                Op::Ldr => "ldr",
+                Op::Mcr => "mcr",
+                Op::Mrc => "mrc",
+                Op::Mrs => "mrs",
+                Op::Msr => "msr",
                 Op::Mul { accumulate, .. } => {
                     match accumulate {
-                        MultiplyOnly => "MUL",
-                        MultiplyAndAccumulate => "MULA",
+                        MultiplyOnly => "mul",
+                        MultiplyAndAccumulate => "mula",
                     }
                 }
                 Op::Mull {
                     sign, accumulate, ..
                 } => {
                     match (sign, accumulate) {
-                        (Signed, MultiplyOnly) => "SMULL",
-                        (Unsigned, MultiplyOnly) => "UMULL",
-                        (Signed, MultiplyAndAccumulate) => "SMLAL",
-                        (Unsigned, MultiplyAndAccumulate) => "UMLAL",
+                        (Signed, MultiplyOnly) => "smull",
+                        (Unsigned, MultiplyOnly) => "umull",
+                        (Signed, MultiplyAndAccumulate) => "smlal",
+                        (Unsigned, MultiplyAndAccumulate) => "umlal",
                     }
                 }
 
-                Op::Stc => "STC",
-                Op::Stm => "STM",
-                Op::Str => "STR",
-                Op::Swi { .. } => "SWI",
-                Op::Swp { .. } => "SWP",
-                Op::Unknown => "UNKNOWN",
+                Op::Stc => "stc",
+                Op::Stm => "stm",
+                Op::Str => "str",
+                Op::Swi { .. } => "swi",
+                Op::Swp { .. } => "swp",
+                Op::Unknown => "unknown",
             }
         )
     }
@@ -534,7 +534,7 @@ impl Display for DataOperand {
             f,
             "{}",
             match &self {
-                DataOperand::ShiftRegister(ShiftRegister { name, .. }) => format!("R{}", name),
+                DataOperand::ShiftRegister(ShiftRegister { name, .. }) => format!("{}", name),
                 DataOperand::RotatedImmediate(ri) => format!("#{}", ri.imm_value()),
             }
         )
@@ -565,7 +565,7 @@ impl Display for Operand {
             f,
             "{}",
             match &self {
-                Self::Register(r) => format!("R{}", r),
+                Self::Register(r) => format!("{}", r),
                 Self::Immediate(i) => format!("#{}", i),
             }
         )
@@ -594,10 +594,10 @@ impl Instruction {
     pub fn get_operands(
         &self,
     ) -> (
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
+        Option<String>, // dest (dest-lo)
+        Option<String>, // op1 or dest-hi
+        Option<String>, // op2 or op1
+        Option<String>, // op3 or op2
     ) {
         match self.op {
             Op::Data(op) => {
@@ -639,33 +639,33 @@ impl Display for Instruction {
             }
             _ => "".into(),
         };
-
         match self.get_operands() {
             (None, None, None, None) => {
                 write!(f, "{}{}{}", self.op, self.condition, extra_letter)
             }
-            (Some(op1), None, None, None) => {
-                write!(f, "{}{}{} {}", self.op, self.condition, extra_letter, op1)
+            (Some(dest), None, None, None) => {
+                write!(f, "{}{}{} {}", self.op, self.condition, extra_letter, dest)
             }
-            (Some(op1), Some(op2), None, None) => {
+            // op1=None and op2=Some can happen, but not vice-versa
+            (Some(dest), None, Some(op2), None) => {
                 write!(
                     f,
-                    "{}{}{} {},{}",
-                    self.op, self.condition, extra_letter, op1, op2
+                    "{}{}{} {}, {}",
+                    self.op, self.condition, extra_letter, dest, op2,
                 )
             }
-            (Some(op1), Some(op2), Some(op3), None) => {
+            (Some(dest), Some(op1), Some(op2), None) => {
                 write!(
                     f,
-                    "{}{}{} {},{},{}",
-                    self.op, self.condition, extra_letter, op1, op2, op3
+                    "{}{}{} {}, {}, {}",
+                    self.op, self.condition, extra_letter, dest, op1, op2
                 )
             }
-            (Some(op1), Some(op2), Some(op3), Some(op4)) => {
+            (Some(dest), Some(op1), Some(op2), Some(op3)) => {
                 write!(
                     f,
-                    "{}{}{} {},{},{},{}",
-                    self.op, self.condition, extra_letter, op1, op2, op3, op4
+                    "{}{}{} {}, {}, {}, {}",
+                    self.op, self.condition, extra_letter, dest, op1, op2, op3
                 )
             }
             _ => unreachable!("A previous Operand was `None`"),
@@ -953,10 +953,11 @@ impl Decoder {
 mod tests {
     use super::*;
 
-    // Instruction hex -> expectation mapping
-    const TEST_INSTRUCTIONS: [(u32, Instruction); 4] = [
+    // Instruction hex, assembly string, expected decoded instruction
+    const TEST_INSTRUCTIONS: [(u32, &str, Instruction); 4] = [
         (
-            0xe2833001, // 	add	r3, r3, #1
+            0xe2833001,
+            "add r3, r3, #1",
             Instruction {
                 condition: Condition::Al,
                 op: Op::Data(DataOp {
@@ -970,7 +971,8 @@ mod tests {
             },
         ),
         (
-            0xe0823003, // add r3, r2, r3
+            0xe0823003,
+            "add r3, r2, r3",
             Instruction {
                 condition: Condition::Al,
                 op: Op::Data(DataOp {
@@ -987,12 +989,12 @@ mod tests {
             },
         ),
         (
-            0xe24dd01c, // sub sp, sp, #28
+            0xe24dd01c,
+            "sub r13, r13, #28",
             Instruction {
                 condition: Condition::Al,
                 op: Op::Data(DataOp {
                     opcode: Sub,
-                    // R13 = stack pointer
                     operands: DataOperands {
                         op1: Some(RegisterName::R13),
                         op2: DataOperand::RotatedImmediate(RotatedImmediate::new_imm(28, 0)),
@@ -1002,7 +1004,8 @@ mod tests {
             },
         ),
         (
-            0xe3a09a01, // mov r9, #4096
+            0xe3a09a01,
+            "mov r9, #4096",
             Instruction {
                 condition: Condition::Al,
                 op: Op::Data(DataOp {
@@ -1040,12 +1043,24 @@ mod tests {
 
     #[test]
     fn decode_instructions_test() {
-        for (instr, expect_decoded) in TEST_INSTRUCTIONS.into_iter() {
+        for (instr, _, expect_decoded) in TEST_INSTRUCTIONS.into_iter() {
             let actual_decoded = Decoder::decode(instr);
             assert_eq!(
                 expect_decoded, actual_decoded,
                 "\nEXPECTED:\n{:#?}\n\nACTUAL:\n{:#?}",
                 expect_decoded, actual_decoded
+            );
+        }
+    }
+
+    #[test]
+    fn stringify_instructions_test() {
+        for (instr, expected_str, _) in TEST_INSTRUCTIONS.into_iter() {
+            let actual_str = Decoder::decode(instr).to_string();
+            assert_eq!(
+                expected_str, actual_str,
+                "\nEXPECTED:\n{:#?}\n\nACTUAL:\n{:#?}",
+                expected_str, actual_str
             );
         }
     }
