@@ -39,7 +39,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "arm7tdmi_disassembler"
+name = "arm7tdmi_decoder"
 version = "0.1.0"
 dependencies = [
  "modular-bitfield",

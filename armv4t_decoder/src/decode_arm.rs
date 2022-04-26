@@ -184,7 +184,7 @@ impl From<u16> for ShiftSource {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ShiftRegister {
     name: RegisterName,
-    shift: (ShiftSource, ShiftType, u8),
+    shift: (ShiftSource, ShiftType),
 }
 
 impl Display for ShiftRegister {
@@ -318,38 +318,64 @@ impl Display for ByteOrWord {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Op {
-    // Add with carry
-    Adc {
-        op1: RegisterName,
-        op2: Operand,
-        dst: RegisterName,
-    },
-    // Add
-    Add {
-        op1: RegisterName,
-        op2: Operand,
-        dst: RegisterName,
-    },
-    // Logical AND
-    And,
-    B,   // Branch
-    Bic, // Bit clear
-    Bl,  // Branch with link
-    Bx,  // Branch and Exchange
-    Cdp, // Coprocessor Data Processing
-    Cmn, // Compare negative
-    Cmp, // Compare
-    Eor, // Exclusive OR
-    Ldc, // Load coprocessor from memory
-    Ldm, // Load multiple regisers
-    Ldr, // Load register from memory
-    Mcr, // Move CPU register to coprocessor register
-    Mov, // Move register or constant
-    Mrc, // Move from coprocessor register to CPU register
-    Mrs, // Move PSR status/flags to register
-    Msr, // Move register to PSR status/flags
+pub struct DataOperands {
+    op1: Option<RegisterName>,
+    op2: DataOperand,
+    dst: RegisterName,
+}
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DataOpcode {
+    And, // Logical AND
+    Eor, // Exclusive OR
+    Sub, // Subtract
+    Rsb, // Reverse subtract
+    Add, // Add
+    Adc, // Add with carry
+    Sbc, // Subtract with carry
+    Rsc, // Reverse subtract with carry
+    Tst, // Test bits
+    Teq, // Test bitwise equality
+    Cmp, // Compare
+    Cmn, // Compare negative
+    Orr, // Or
+    Mov, // Move register or constant
+    Bic, // Bit clear
+    Mvn, // Move negative register
+}
+
+use DataOpcode::*;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DataOp {
+    opcode: DataOpcode,
+    operands: DataOperands,
+}
+
+impl DataOp {
+    pub fn get_operands(&self) -> (String, Option<String>, String) {
+        (
+            self.operands.dst.to_string(),
+            self.operands.op1.and_then(|o| Some(o.to_string())),
+            self.operands.op2.to_string(),
+        )
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Op {
+    Data(DataOp), // All Data Processing ops
+    B,            // Branch
+    Bl,           // Branch with link
+    Bx,           // Branch and Exchange
+    Cdp,          // Coprocessor Data Processing
+    Ldc,          // Load coprocessor from memory
+    Ldm,          // Load multiple regisers
+    Ldr,          // Load register from memory
+    Mcr,          // Move CPU register to coprocessor register
+    Mrc,          // Move from coprocessor register to CPU register
+    Mrs,          // Move PSR status/flags to register
+    Msr,          // Move register to PSR status/flags
     // Multiply
     Mul {
         accumulate: Accumulate,
@@ -367,16 +393,9 @@ pub enum Op {
         op1: RegisterName,
         op2: RegisterName,
     },
-    Mvn, // Move negative register
-    Orr, // Or
-    Rsb, // Reverse subtract
-    Rsc, // Reverse subtract with carry
-    Sbc, // Subtract with carry
     Stc, // Store coprocessor register to memory
     Stm, // Store multiple
     Str, // Store register to memory
-    Sub, // Subtract
-
     // Software interrupt
     Swi {
         comment_field: Immediate,
@@ -388,8 +407,6 @@ pub enum Op {
         base: RegisterName,
         size: ByteOrWord,
     },
-    Teq, // Test bitwise equality
-    Tst, // Test bits
     Unknown,
 }
 
@@ -399,22 +416,32 @@ impl Display for Op {
             f,
             "{}",
             match &self {
-                Op::Adc { .. } => "ADC",
-                Op::Add { .. } => "ADD",
-                Op::And => "AND",
+                Op::Data(DataOp { opcode, .. }) => match opcode {
+                    Adc => "ADC",
+                    Add => "ADD",
+                    And => "AND",
+                    Cmn => "CMN",
+                    Cmp => "CMP",
+                    Eor => "EOR",
+                    Mov => "MOV",
+                    Rsb => "RSB",
+                    Rsc => "RSC",
+                    Sbc => "SBC",
+                    Sub => "SUB",
+                    Orr => "ORR",
+                    Teq => "TEQ",
+                    Tst => "TST",
+                    Bic => "BIC",
+                    Mvn => "MVN",
+                },
                 Op::B => "B",
-                Op::Bic => "BIC",
                 Op::Bl => "BL",
                 Op::Bx => "BX",
                 Op::Cdp => "CDP",
-                Op::Cmn => "CMN",
-                Op::Cmp => "CMP",
-                Op::Eor => "EOR",
                 Op::Ldc => "LDC",
                 Op::Ldm => "LDM",
                 Op::Ldr => "LDR",
                 Op::Mcr => "MCR",
-                Op::Mov => "MOV",
                 Op::Mrc => "MRC",
                 Op::Mrs => "MRS",
                 Op::Msr => "MSR",
@@ -434,19 +461,12 @@ impl Display for Op {
                         (Unsigned, MultiplyAndAccumulate) => "UMLAL",
                     }
                 }
-                Op::Mvn => "MVN",
-                Op::Orr => "ORR",
-                Op::Rsb => "RSB",
-                Op::Rsc => "RSC",
-                Op::Sbc => "SBC",
+
                 Op::Stc => "STC",
                 Op::Stm => "STM",
                 Op::Str => "STR",
-                Op::Sub => "SUB",
                 Op::Swi { .. } => "SWI",
                 Op::Swp { .. } => "SWP",
-                Op::Teq => "TEQ",
-                Op::Tst => "TST",
                 Op::Unknown => "UNKNOWN",
             }
         )
@@ -472,19 +492,19 @@ impl From<u32> for Immediate {
 #[bitfield(bits = 12)]
 pub struct RotatedImmediate {
     value: B8,  // To be zero-extended to 32 bits
-    rotate: B4, // Twice this amount is applied to `value`
+    rotate: B4, // `value` is right-rotated by twice this amount
 }
 
 impl RotatedImmediate {
     pub const fn new_imm(value: u8, rotate: u8) -> Self {
         Self {
-            bytes: [value, rotate << 4],
+            bytes: [value, rotate],
         }
     }
 
     pub fn imm_value(&self) -> u32 {
         let value = self.value() as u32;
-        value.rotate_right(value * 2)
+        value.rotate_right(self.rotate() as u32 * 2)
     }
 }
 
@@ -503,9 +523,38 @@ impl PartialEq for RotatedImmediate {
 impl Eq for RotatedImmediate {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Operand {
+pub enum DataOperand {
     RotatedImmediate(RotatedImmediate),
     ShiftRegister(ShiftRegister),
+}
+
+impl Display for DataOperand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match &self {
+                DataOperand::ShiftRegister(ShiftRegister { name, .. }) => format!("R{}", name),
+                DataOperand::RotatedImmediate(ri) => format!("#{}", ri.imm_value()),
+            }
+        )
+    }
+}
+
+impl From<RotatedImmediate> for DataOperand {
+    fn from(ri: RotatedImmediate) -> Self {
+        DataOperand::RotatedImmediate(ri)
+    }
+}
+
+impl From<ShiftRegister> for DataOperand {
+    fn from(sr: ShiftRegister) -> Self {
+        Self::ShiftRegister(sr)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Operand {
     Register(RegisterName),
     Immediate(Immediate),
 }
@@ -516,18 +565,10 @@ impl Display for Operand {
             f,
             "{}",
             match &self {
-                Operand::Register(r) => format!("R{}", r),
-                Operand::Immediate(i) => format!("#{}", i),
-                Operand::ShiftRegister(ShiftRegister { name, .. }) => format!("R{}", name),
-                Operand::RotatedImmediate(ri) => format!("#{}", ri.imm_value()),
+                Self::Register(r) => format!("R{}", r),
+                Self::Immediate(i) => format!("#{}", i),
             }
         )
-    }
-}
-
-impl From<RotatedImmediate> for Operand {
-    fn from(ri: RotatedImmediate) -> Self {
-        Operand::RotatedImmediate(ri)
     }
 }
 
@@ -543,12 +584,6 @@ impl From<Immediate> for Operand {
     }
 }
 
-impl From<ShiftRegister> for Operand {
-    fn from(sr: ShiftRegister) -> Self {
-        Self::ShiftRegister(sr)
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Instruction {
     condition: Condition,
@@ -559,14 +594,16 @@ impl Instruction {
     pub fn get_operands(
         &self,
     ) -> (
-        Option<Operand>,
-        Option<Operand>,
-        Option<Operand>,
-        Option<Operand>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
     ) {
         match self.op {
-            Op::Adc { dst, op1, op2 } => (Some(dst.into()), Some(op1.into()), Some(op2), None),
-            Op::Add { dst, op1, op2 } => (Some(dst.into()), Some(op1.into()), Some(op2), None),
+            Op::Data(op) => {
+                let (dst, op1, op2) = op.get_operands();
+                (Some(dst), op1, Some(op2), None)
+            }
             Op::Mull {
                 dest_low,
                 dest_high,
@@ -574,15 +611,18 @@ impl Instruction {
                 op2,
                 ..
             } => (
-                Some(dest_low.into()),
-                Some(dest_high.into()),
-                Some(op1.into()),
-                Some(op2.into()),
+                Some(dest_low.to_string()),
+                Some(dest_high.to_string()),
+                Some(op1.to_string()),
+                Some(op2.to_string()),
             ),
-            Op::Swp { src, dst, base, .. } => {
-                (Some(dst.into()), Some(src.into()), Some(base.into()), None)
-            }
-            Op::Swi { comment_field } => (Some(comment_field.into()), None, None, None),
+            Op::Swp { src, dst, base, .. } => (
+                Some(dst.to_string()),
+                Some(src.to_string()),
+                Some(base.to_string()),
+                None,
+            ),
+            Op::Swi { comment_field } => (Some(comment_field.to_string()), None, None, None),
             _ => (None, None, None, None),
         }
     }
@@ -707,60 +747,65 @@ impl Decoder {
                 }
             }
             OpFormat::DataProcessing => {
-                let op = Decoder::get_data_processing_op(instr);
-                Instruction { condition, op }
+                let alu_op = Decoder::get_dp_op(instr);
+                Instruction {
+                    condition,
+                    op: Op::Data(alu_op),
+                }
             }
             _ => todo!("{:?}", format),
         }
     }
 
-    fn get_data_processing_op(instr: u32) -> Op {
-        let opcode = (instr >> 21) & 0b1111;
-        match opcode {
-            0b0000 => Op::And,
-            0b0001 => Op::Eor,
-            0b0010 => Op::Sub,
-            0b0011 => Op::Rsb,
-            0b0100 | 0b0101 => {
-                let op1 = ((instr >> 16) & 0b1111) as u16;
-                let op1 = RegisterName::from(op1);
-
-                let op2 = (instr & ((1 << 12) - 1)) as u16;
-                let is_immediate = ((instr >> 25) & 1) == 1;
-                let op2 = if is_immediate {
-                    let rot_imm = RotatedImmediate::from_bytes(op2.to_ne_bytes());
-                    Operand::RotatedImmediate(rot_imm)
-                } else {
-                    let shift_type = ShiftType::from_bytes(((op2 >> 5) & 0b11) as u8).unwrap();
-                    let shift_amount = ((op2 >> 7) & 0b11111) as u8;
-                    let reg = op2 & 0b1111;
-                    let op2 = ShiftRegister {
-                        name: reg.into(),
-                        shift: (ShiftSource::from(op2), shift_type, shift_amount),
-                    };
-                    Operand::ShiftRegister(op2)
+    fn get_dp_op(instr: u32) -> DataOp {
+        let opcode_bits = (instr >> 21) & 0b1111;
+        let opcode = match opcode_bits {
+            0b0000 => And,
+            0b0001 => Eor,
+            0b0010 => Sub,
+            0b0011 => Rsb,
+            0b0100 => Add,
+            0b0101 => Adc,
+            0b0110 => Sbc,
+            0b0111 => Rsc,
+            0b1000 => Tst,
+            0b1001 => Teq,
+            0b1010 => Cmp,
+            0b1011 => Cmn,
+            0b1100 => Orr,
+            0b1101 => Mov,
+            0b1110 => Bic,
+            0b1111 => Mvn,
+            _ => panic!("Opcode {opcode_bits} invalid for data processing format"),
+        };
+        let operands = {
+            let op1 = if opcode == DataOpcode::Mov {
+                None
+            } else {
+                let bits = ((instr >> 16) & 0b1111) as u16;
+                Some(RegisterName::from(bits))
+            };
+            let op2 = (instr & ((1 << 12) - 1)) as u16;
+            let is_immediate = ((instr >> 25) & 1) == 1;
+            let op2 = if is_immediate {
+                let rot_imm = RotatedImmediate::from_bytes(op2.to_ne_bytes());
+                DataOperand::RotatedImmediate(rot_imm)
+            } else {
+                let shift_type = ShiftType::from_bytes(((op2 >> 5) & 0b11) as u8).unwrap();
+                let shift_source = ShiftSource::from(op2);
+                let reg = op2 & 0b1111;
+                let op2 = ShiftRegister {
+                    name: reg.into(),
+                    shift: (shift_source, shift_type),
                 };
+                DataOperand::ShiftRegister(op2)
+            };
 
-                let dst = ((instr >> 12) & 0b1111) as u16;
-                let dst = RegisterName::from(dst);
-                if opcode == 0b0100 {
-                    Op::Add { op1, op2, dst }
-                } else {
-                    Op::Adc { op1, op2, dst }
-                }
-            }
-            0b0110 => Op::Sbc,
-            0b0111 => Op::Rsc,
-            0b1000 => Op::Tst,
-            0b1001 => Op::Teq,
-            0b1010 => Op::Cmp,
-            0b1011 => Op::Cmn,
-            0b1100 => Op::Orr,
-            0b1101 => Op::Mov,
-            0b1110 => Op::Bic,
-            0b1111 => Op::Mvn,
-            _ => panic!("Opcode {opcode} invalid for data processing format"),
-        }
+            let dst = ((instr >> 12) & 0b1111) as u16;
+            let dst = RegisterName::from(dst);
+            DataOperands { dst, op1, op2 }
+        };
+        DataOp { opcode, operands }
     }
 
     /// Get the condition field of the ARM instruction
@@ -769,20 +814,6 @@ impl Decoder {
         Condition::from_bytes(cond_bits)
             .unwrap_or_else(|e| panic!("Invalid bit pattern for ARM condition: {e}"))
     }
-
-    // #[inline]
-    // #[allow(dead_code)]
-    // /// Return the 12 bit index for the [DecoderTable]:
-    // /// ```
-    // /// |   28    24    20    16    12     8     4     0
-    // /// |-----|-----|-----|-----|-----|-----|-----|-----|
-    // /// |1111 |1111 |1111 |1111 |1111 |1111 |1111 |1111 |
-    // /// |-----|-----|-----|-----|-----|-----|-----|-----|
-    // /// |     |BA98 |7654 |     |     |3210 |     |     |
-    // /// ```
-    // fn get_index(instr: u32) -> usize {
-    //     ((instr >> 16) & 0xFF0 | ((instr >> 4) & 0x00F)) as usize
-    // }
 
     fn is_branch_and_branch_exchange(instr: u32) -> bool {
         let branch_and_exchange_format = 0b0000_0001_0010_1111_1111_1111_0001_0000;
@@ -923,17 +954,89 @@ mod tests {
     use super::*;
 
     // Instruction hex -> expectation mapping
-    const TEST_INSTRUCTIONS: [(u32, Instruction); 1] = [(
-        0xe2833001, // 	add	r3, r3, #1
-        Instruction {
-            condition: Condition::Al,
-            op: Op::Add {
-                op1: R3,
-                op2: Operand::RotatedImmediate(RotatedImmediate::new_imm(1, 0)),
-                dst: R3,
+    const TEST_INSTRUCTIONS: [(u32, Instruction); 4] = [
+        (
+            0xe2833001, // 	add	r3, r3, #1
+            Instruction {
+                condition: Condition::Al,
+                op: Op::Data(DataOp {
+                    opcode: Add,
+                    operands: DataOperands {
+                        op1: Some(R3),
+                        op2: DataOperand::RotatedImmediate(RotatedImmediate::new_imm(1, 0)),
+                        dst: R3,
+                    },
+                }),
             },
-        },
-    )];
+        ),
+        (
+            0xe0823003, // add r3, r2, r3
+            Instruction {
+                condition: Condition::Al,
+                op: Op::Data(DataOp {
+                    opcode: Add,
+                    operands: DataOperands {
+                        op1: Some(R2),
+                        op2: DataOperand::ShiftRegister(ShiftRegister {
+                            name: R3,
+                            shift: (ShiftSource::Amount(0), ShiftType::LogicalLeft),
+                        }),
+                        dst: R3,
+                    },
+                }),
+            },
+        ),
+        (
+            0xe24dd01c, // sub sp, sp, #28
+            Instruction {
+                condition: Condition::Al,
+                op: Op::Data(DataOp {
+                    opcode: Sub,
+                    // R13 = stack pointer
+                    operands: DataOperands {
+                        op1: Some(RegisterName::R13),
+                        op2: DataOperand::RotatedImmediate(RotatedImmediate::new_imm(28, 0)),
+                        dst: R13,
+                    },
+                }),
+            },
+        ),
+        (
+            0xe3a09a01, // mov r9, #4096
+            Instruction {
+                condition: Condition::Al,
+                op: Op::Data(DataOp {
+                    opcode: Mov,
+                    operands: DataOperands {
+                        op1: None,
+                        op2: DataOperand::RotatedImmediate(RotatedImmediate::new_imm(1, 0b1010)),
+                        dst: R9,
+                    },
+                }),
+            },
+        ),
+    ];
+
+    #[test]
+    fn rotated_imm_eq_test() {
+        let rot_imm1 = RotatedImmediate::new_imm(0, 0);
+        let rot_imm2 = RotatedImmediate::new_imm(0, 1);
+        let rot_imm3 = RotatedImmediate::new_imm(1, 0);
+        let rot_imm4 = RotatedImmediate::new_imm(1, 1);
+        assert_ne!(rot_imm1, rot_imm2);
+        assert_ne!(rot_imm1, rot_imm3);
+        assert_ne!(rot_imm1, rot_imm4);
+
+        assert_ne!(rot_imm2, rot_imm3);
+        assert_ne!(rot_imm2, rot_imm4);
+
+        assert_ne!(rot_imm3, rot_imm4);
+    }
+
+    #[test]
+    fn rotated_imm_value_test() {
+        assert_eq!(RotatedImmediate::new_imm(1, 0b1010).imm_value(), 4096)
+    }
 
     #[test]
     fn decode_instructions_test() {
@@ -946,36 +1049,4 @@ mod tests {
             );
         }
     }
-
-    // #[test]
-    // fn swi_decode() {
-    //     // SWINE 0
-    //     assert_eq!(
-    //         Decoder::decode(0x1F000000).op,
-    //         Op::Swi {
-    //             comment_field: Immediate(0)
-    //         }
-    //     );
-    //     // SWILE 0
-    //     assert_eq!(
-    //         Decoder::decode(0xDF000000).op,
-    //         Op::Swi {
-    //             comment_field: Immediate(0)
-    //         }
-    //     );
-    //     // SWIVC 0
-    //     assert_eq!(
-    //         Decoder::decode(0x7F000000).op,
-    //         Op::Swi {
-    //             comment_field: Immediate(0)
-    //         }
-    //     );
-    //     // SWIGE 0xFFFFFF
-    //     assert_eq!(
-    //         Decoder::decode(0xAFFFFFFF).op,
-    //         Op::Swi {
-    //             comment_field: Immediate(0xFFFFFF)
-    //         }
-    //     );
-    // }
 }
