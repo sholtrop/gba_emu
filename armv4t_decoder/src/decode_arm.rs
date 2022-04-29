@@ -1,111 +1,6 @@
+use modular_bitfield::Specifier;
 use modular_bitfield::{bitfield, specifiers::*, BitfieldSpecifier};
 use std::fmt::Display;
-
-/*
-package gba
-
-// 27-26: 00
-func IsArmALU(inst uint32) bool {
-    return inst&0b0000_1100_0000_0000_0000_0000_0000_0000 == 0
-}
-
-// 27-24: 1011
-func IsArmBL(inst uint32) bool {
-    return inst&0b0000_1111_0000_0000_0000_0000_0000_0000 == 0b0000_1011_0000_0000_0000_0000_0000_0000
-}
-
-// 27-24: 1010
-func IsArmB(inst uint32) bool {
-    return inst&0b0000_1111_0000_0000_0000_0000_0000_0000 == 0b0000_1010_0000_0000_0000_0000_0000_0000
-}
-
-// 27-8: 0001_0010_1111_1111_1111 && 7-4: 0001
-func IsArmBX(inst uint32) bool {
-    return inst&0b0000_1111_1111_1111_1111_1111_1111_0000 == 0b0000_0001_0010_1111_1111_1111_0001_0000
-}
-
-// 27-24: 1111
-func IsArmSWI(inst uint32) bool {
-    return inst&0b0000_1111_0000_0000_0000_0000_0000_0000 == 0b0000_1111_0000_0000_0000_0000_0000_0000
-}
-
-// 27-25: 011
-func IsArmUND(inst uint32) bool {
-    return inst&0b0000_1110_0000_0000_0000_0000_0000_0000 == 0b0000_0110_0000_0000_0000_0000_0000_0000
-}
-
-// multiply
-
-// 27-25: 000 & 7-4: 1001
-func IsArmMPY(inst uint32) bool {
-    return inst&0b0000_1110_0000_0000_0000_0000_1111_0000 == 0b0000_0000_0000_0000_0000_0000_1001_0000
-}
-
-// 27-25: 000 & 20: 0 & 7: 1 & 4: 0
-func IsArmMPY16(inst uint32) bool {
-    return inst&0b0000_1110_0001_0000_0000_0000_1001_0000 == 0b0000_0000_0000_0000_0000_0000_1000_0000
-}
-
-// loadstore
-
-// 27-26: 01
-func IsArmLDR(inst uint32) bool {
-    return inst&0b0000_1100_0001_0000_0000_0000_0000_0000 == 0b0000_0100_0001_0000_0000_0000_0000_0000
-}
-
-// 27-26: 01
-func IsArmSTR(inst uint32) bool {
-    return inst&0b0000_1100_0001_0000_0000_0000_0000_0000 == 0b0000_0100_0000_0000_0000_0000_0000_0000
-}
-
-// 27-25: 000 & 20: 1 & 7-4: 1011
-func IsArmLDRH(inst uint32) bool {
-    return inst&0b0000_1110_0001_0000_0000_0000_1111_0000 == 0b0000_0000_0001_0000_0000_0000_1011_0000
-}
-
-// 27-25: 000 & 20: 1 & 7-4: 1101
-func IsArmLDRSB(inst uint32) bool {
-    return inst&0b0000_1110_0001_0000_0000_0000_1111_0000 == 0b0000_0000_0001_0000_0000_0000_1101_0000
-}
-
-// 27-25: 000 & 20: 1 & 7-4: 1111
-func IsArmLDRSH(inst uint32) bool {
-    return inst&0b0000_1110_0001_0000_0000_0000_1111_0000 == 0b0000_0000_0001_0000_0000_0000_1111_0000
-}
-
-// 27-25: 000 & 20: 0 & 7-4: 1011
-func IsArmSTRH(inst uint32) bool {
-    return inst&0b0000_1110_0001_0000_0000_0000_1111_0000 == 0b0000_0000_0000_0000_0000_0000_1011_0000
-}
-
-// 27-25: 100 & 20: 1
-func IsArmLDM(inst uint32) bool {
-    return inst&0b0000_1110_0001_0000_0000_0000_0000_0000 == 0b0000_1000_0001_0000_0000_0000_0000_0000
-}
-
-// 27-25: 100 & 20: 0
-func IsArmSTM(inst uint32) bool {
-    return inst&0b0000_1110_0001_0000_0000_0000_0000_0000 == 0b0000_1000_0000_0000_0000_0000_0000_0000
-}
-
-// 27-23: 0001_0 & 21-20: 00 & 11-4: 0000_1001
-func IsArmSWP(inst uint32) bool {
-    return inst&0b0000_1111_1011_0000_0000_1111_1111_0000 == 0b0000_0001_0000_0000_0000_0000_1001_0000
-}
-
-// 27-23: 0001_0 & 21-16: 00_1111 & 11-0: 0000_0000_0000
-func IsArmMRS(inst uint32) bool {
-    return inst&0b0000_1111_1011_1111_0000_1111_1111_1111 == 0b0000_0001_0000_1111_0000_0000_0000_0000
-}
-
-// 27-26: 00 & 24-23: 10 & 21-20: 10 & 15-12: 1111
-func IsArmMSR(inst uint32) bool {
-    return inst&0b0000_1101_1011_0000_1111_0000_0000_0000 == 0b0000_0001_0010_0000_1111_0000_0000_0000
-}
-
-
-*/
-use modular_bitfield::Specifier;
 
 const INSTR_SIZE: u8 = 32;
 const COND_SIZE: u8 = 4;
@@ -363,19 +258,49 @@ impl DataOp {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Offset(i32);
+impl Offset {
+    /// Decode a signed 2's complement 24 bit offset.
+    /// The offset is shifted left 2 bits and sign-extended to 32 bits.
+    /// Then 8 is added, as the program counter is always 2 instructions (=8 bytes) behind.
+    pub const fn from_24bits(n: u32) -> Self {
+        let signed = ((n >> 23) & 1) == 1;
+        let shifted = n << 2;
+
+        if signed {
+            Self((shifted | (0b111111 << 26)) as i32 + 8)
+        } else {
+            Self(shifted as i32 + 8)
+        }
+    }
+}
+
+impl Display for Offset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Op {
     Data(DataOp), // All Data Processing ops
-    B,            // Branch
-    Bl,           // Branch with link
-    Bx,           // Branch and Exchange
-    Cdp,          // Coprocessor Data Processing
-    Ldc,          // Load coprocessor from memory
-    Ldm,          // Load multiple regisers
-    Ldr,          // Load register from memory
-    Mcr,          // Move CPU register to coprocessor register
-    Mrc,          // Move from coprocessor register to CPU register
-    Mrs,          // Move PSR status/flags to register
-    Msr,          // Move register to PSR status/flags
+    // Branch
+    B {
+        offset: Offset,
+    },
+    // Branch with link
+    Bl {
+        offset: Offset,
+    },
+    Bx,  // Branch and Exchange
+    Cdp, // Coprocessor Data Processing
+    Ldc, // Load coprocessor from memory
+    Ldm, // Load multiple regisers
+    Ldr, // Load register from memory
+    Mcr, // Move CPU register to coprocessor register
+    Mrc, // Move from coprocessor register to CPU register
+    Mrs, // Move PSR status/flags to register
+    Msr, // Move register to PSR status/flags
     // Multiply
     Mul {
         accumulate: Accumulate,
@@ -434,8 +359,8 @@ impl Display for Op {
                     Bic => "bic",
                     Mvn => "mvn",
                 },
-                Op::B => "b",
-                Op::Bl => "bl",
+                Op::B { .. } => "b",
+                Op::Bl { .. } => "bl",
                 Op::Bx => "bx",
                 Op::Cdp => "cdp",
                 Op::Ldc => "ldc",
@@ -526,6 +451,24 @@ impl Eq for RotatedImmediate {}
 pub enum DataOperand {
     RotatedImmediate(RotatedImmediate),
     ShiftRegister(ShiftRegister),
+}
+
+impl DataOperand {
+    pub const fn make_shift_reg(name: RegisterName, shift: (ShiftSource, ShiftType)) -> Self {
+        Self::ShiftRegister(ShiftRegister { name, shift })
+    }
+
+    /// Create a [ShiftedRegister] without a shift (= shift 0, logical left)
+    pub const fn make_shift_reg_noshift(name: RegisterName) -> Self {
+        Self::ShiftRegister(ShiftRegister {
+            name,
+            shift: (ShiftSource::Amount(0), ShiftType::LogicalLeft),
+        })
+    }
+
+    pub const fn make_rot_imm(value: u8, rotate: u8) -> Self {
+        Self::RotatedImmediate(RotatedImmediate::new_imm(value, rotate))
+    }
 }
 
 impl Display for DataOperand {
@@ -622,6 +565,7 @@ impl Instruction {
                 Some(base.to_string()),
                 None,
             ),
+            Op::B { offset } | Op::Bl { offset } => (Some(offset.0.to_string()), None, None, None),
             Op::Swi { comment_field } => (Some(comment_field.to_string()), None, None, None),
             _ => (None, None, None, None),
         }
@@ -734,9 +678,16 @@ impl Decoder {
     fn get_instr(format: OpFormat, instr: u32) -> Instruction {
         let condition = Decoder::get_condition(instr);
         match format {
-            OpFormat::BranchAndBranchExchange => {
+            OpFormat::BranchAndBranchWithLink => {
                 let link_bit = instr >> 24;
-                let op = if link_bit == 1 { Op::Bl } else { Op::B };
+                let offset = instr & ((1 << 24) - 1);
+                let offset = Offset::from_24bits(offset);
+
+                let op = if link_bit == 1 {
+                    Op::Bl { offset }
+                } else {
+                    Op::B { offset }
+                };
                 Instruction { condition, op }
             }
             OpFormat::SoftwareInterrupt => {
@@ -747,7 +698,7 @@ impl Decoder {
                 }
             }
             OpFormat::DataProcessing => {
-                let alu_op = Decoder::get_dp_op(instr);
+                let alu_op = Decoder::get_data_op(instr);
                 Instruction {
                     condition,
                     op: Op::Data(alu_op),
@@ -757,7 +708,7 @@ impl Decoder {
         }
     }
 
-    fn get_dp_op(instr: u32) -> DataOp {
+    fn get_data_op(instr: u32) -> DataOp {
         let opcode_bits = (instr >> 21) & 0b1111;
         let opcode = match opcode_bits {
             0b0000 => And,
@@ -954,7 +905,7 @@ mod tests {
     use super::*;
 
     // Instruction hex, assembly string, expected decoded instruction
-    const TEST_INSTRUCTIONS: [(u32, &str, Instruction); 4] = [
+    const TEST_INSTRUCTIONS: [(u32, &str, Instruction); 7] = [
         (
             0xe2833001,
             "add r3, r3, #1",
@@ -964,7 +915,7 @@ mod tests {
                     opcode: Add,
                     operands: DataOperands {
                         op1: Some(R3),
-                        op2: DataOperand::RotatedImmediate(RotatedImmediate::new_imm(1, 0)),
+                        op2: DataOperand::make_rot_imm(1, 0),
                         dst: R3,
                     },
                 }),
@@ -979,10 +930,7 @@ mod tests {
                     opcode: Add,
                     operands: DataOperands {
                         op1: Some(R2),
-                        op2: DataOperand::ShiftRegister(ShiftRegister {
-                            name: R3,
-                            shift: (ShiftSource::Amount(0), ShiftType::LogicalLeft),
-                        }),
+                        op2: DataOperand::make_shift_reg_noshift(R3),
                         dst: R3,
                     },
                 }),
@@ -997,7 +945,7 @@ mod tests {
                     opcode: Sub,
                     operands: DataOperands {
                         op1: Some(RegisterName::R13),
-                        op2: DataOperand::RotatedImmediate(RotatedImmediate::new_imm(28, 0)),
+                        op2: DataOperand::make_rot_imm(28, 0),
                         dst: R13,
                     },
                 }),
@@ -1012,10 +960,50 @@ mod tests {
                     opcode: Mov,
                     operands: DataOperands {
                         op1: None,
-                        op2: DataOperand::RotatedImmediate(RotatedImmediate::new_imm(1, 0b1010)),
+                        op2: DataOperand::make_rot_imm(1, 0b1010),
                         dst: R9,
                     },
                 }),
+            },
+        ),
+        (
+            0xe2a5400a,
+            "adc r4, r5, #10",
+            Instruction {
+                condition: Condition::Al,
+                op: Op::Data(DataOp {
+                    opcode: Adc,
+                    operands: DataOperands {
+                        op1: Some(R5),
+                        op2: DataOperand::make_rot_imm(10, 0),
+                        dst: R4,
+                    },
+                }),
+            },
+        ),
+        (
+            0xe0076008,
+            "and r6, r7, r8",
+            Instruction {
+                condition: Condition::Al,
+                op: Op::Data(DataOp {
+                    opcode: And,
+                    operands: DataOperands {
+                        op1: Some(R7),
+                        op2: DataOperand::make_shift_reg_noshift(R8),
+                        dst: R6,
+                    },
+                }),
+            },
+        ),
+        (
+            0xeafffffe,
+            "b 0",
+            Instruction {
+                condition: Condition::Al,
+                op: Op::B {
+                    offset: Offset::from_24bits(0xfffffe),
+                },
             },
         ),
     ];
