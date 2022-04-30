@@ -8,6 +8,7 @@
 	.eabi_attribute 30, 6
 	.eabi_attribute 34, 0
 	.eabi_attribute 18, 4
+	.file	"add.c"
 	.text
 	.align	2
 	.global	main
@@ -17,9 +18,7 @@
 	.type	main, %function
 main:
 	@ Function supports interworking.
-	@ args = 0, pretend = 0, frame = 0
+	@ args = 0, pretend = 0, frame = 8
 	@ frame_needed = 1, uses_anonymous_args = 0
 	@ link register save eliminated.
-	b main
-	.size	main, .-main
-	.ident	"GCC: (15:6.3.1+svn253039-1build1) 6.3.1 20170620"
+	bic	r2, r9, #0xAA

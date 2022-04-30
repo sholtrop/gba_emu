@@ -1,13 +1,13 @@
 # Mnemonics to implement
 ## ARM (32-bit)
-| Mnemonic       | Can decode         | Can execute    | Comment    |
-| :-----------:  | :-----------:      | :-----------:  | :--------: |
+| Mnemonic         | Can decode         | Can execute    | Comment    |
+| :-----------:    | :-----------:      | :-----------:  | :--------: |
 | **adc**          |    yes           |                |            |
 | **add**          |    yes           |                |            |
 | **and**          |    yes           |                |            |
 | **b**            |    yes           |                |            |
-| **bic**          |                  |                |            |
-| **bl**           |    testing       |                |            |
+| **bic**          |    yes       |                |            |
+| **bl**           |    yes           |                |            |
 | **bx**           |                  |                |            |
 | **cdp**          |                  |                |            |
 | **cmn**          |                  |                |            |
@@ -39,3 +39,5 @@
    
 ## THUMB (16-bit)
 
+## Other
+* Test big rotated immediates (e.g. 0xc0000000)

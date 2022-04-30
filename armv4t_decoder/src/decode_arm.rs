@@ -335,13 +335,15 @@ pub enum Op {
     Unknown,
 }
 
+use Op::*;
+
 impl Display for Op {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "{}",
             match &self {
-                Op::Data(DataOp { opcode, .. }) => match opcode {
+                Data(DataOp { opcode, .. }) => match opcode {
                     Adc => "adc",
                     Add => "add",
                     And => "and",
@@ -359,24 +361,24 @@ impl Display for Op {
                     Bic => "bic",
                     Mvn => "mvn",
                 },
-                Op::B { .. } => "b",
-                Op::Bl { .. } => "bl",
-                Op::Bx => "bx",
-                Op::Cdp => "cdp",
-                Op::Ldc => "ldc",
-                Op::Ldm => "ldm",
-                Op::Ldr => "ldr",
-                Op::Mcr => "mcr",
-                Op::Mrc => "mrc",
-                Op::Mrs => "mrs",
-                Op::Msr => "msr",
-                Op::Mul { accumulate, .. } => {
+                B { .. } => "b",
+                Bl { .. } => "bl",
+                Bx => "bx",
+                Cdp => "cdp",
+                Ldc => "ldc",
+                Ldm => "ldm",
+                Ldr => "ldr",
+                Mcr => "mcr",
+                Mrc => "mrc",
+                Mrs => "mrs",
+                Msr => "msr",
+                Mul { accumulate, .. } => {
                     match accumulate {
                         MultiplyOnly => "mul",
                         MultiplyAndAccumulate => "mula",
                     }
                 }
-                Op::Mull {
+                Mull {
                     sign, accumulate, ..
                 } => {
                     match (sign, accumulate) {
@@ -387,12 +389,12 @@ impl Display for Op {
                     }
                 }
 
-                Op::Stc => "stc",
-                Op::Stm => "stm",
-                Op::Str => "str",
-                Op::Swi { .. } => "swi",
-                Op::Swp { .. } => "swp",
-                Op::Unknown => "unknown",
+                Stc => "stc",
+                Stm => "stm",
+                Str => "str",
+                Swi { .. } => "swi",
+                Swp { .. } => "swp",
+                Unknown => "unknown",
             }
         )
     }
@@ -429,6 +431,7 @@ impl RotatedImmediate {
 
     pub fn imm_value(&self) -> u32 {
         let value = self.value() as u32;
+        dbg!("{}", value.rotate_right(self.rotate() as u32 * 2));
         value.rotate_right(self.rotate() as u32 * 2)
     }
 }
@@ -543,11 +546,11 @@ impl Instruction {
         Option<String>, // op3 or op2
     ) {
         match self.op {
-            Op::Data(op) => {
+            Data(op) => {
                 let (dst, op1, op2) = op.get_operands();
                 (Some(dst), op1, Some(op2), None)
             }
-            Op::Mull {
+            Mull {
                 dest_low,
                 dest_high,
                 op1,
@@ -559,14 +562,14 @@ impl Instruction {
                 Some(op1.to_string()),
                 Some(op2.to_string()),
             ),
-            Op::Swp { src, dst, base, .. } => (
+            Swp { src, dst, base, .. } => (
                 Some(dst.to_string()),
                 Some(src.to_string()),
                 Some(base.to_string()),
                 None,
             ),
-            Op::B { offset } | Op::Bl { offset } => (Some(offset.0.to_string()), None, None, None),
-            Op::Swi { comment_field } => (Some(comment_field.to_string()), None, None, None),
+            B { offset } | Bl { offset } => (Some(offset.0.to_string()), None, None, None),
+            Swi { comment_field } => (Some(comment_field.to_string()), None, None, None),
             _ => (None, None, None, None),
         }
     }
@@ -577,10 +580,8 @@ impl Display for Instruction {
         // Certain instructions can add an extra letter to the mnemonic.
         // E.g. MUL can become MULEQS with condition code EQ and set_condition=true
         let extra_letter = match self.op {
-            Op::Swp { size, .. } => size.to_string(),
-            Op::Mul { set_condition, .. } | Op::Mull { set_condition, .. } => {
-                set_condition.to_string()
-            }
+            Swp { size, .. } => size.to_string(),
+            Mul { set_condition, .. } | Mull { set_condition, .. } => set_condition.to_string(),
             _ => "".into(),
         };
         match self.get_operands() {
@@ -679,14 +680,14 @@ impl Decoder {
         let condition = Decoder::get_condition(instr);
         match format {
             OpFormat::BranchAndBranchWithLink => {
-                let link_bit = instr >> 24;
+                let link_bit = instr >> 24 & 1;
                 let offset = instr & ((1 << 24) - 1);
                 let offset = Offset::from_24bits(offset);
 
                 let op = if link_bit == 1 {
-                    Op::Bl { offset }
+                    Bl { offset }
                 } else {
-                    Op::B { offset }
+                    B { offset }
                 };
                 Instruction { condition, op }
             }
@@ -694,14 +695,14 @@ impl Decoder {
                 let comment_field = (instr & ((1 << 24) - 1)).into();
                 Instruction {
                     condition,
-                    op: Op::Swi { comment_field },
+                    op: Swi { comment_field },
                 }
             }
             OpFormat::DataProcessing => {
                 let alu_op = Decoder::get_data_op(instr);
                 Instruction {
                     condition,
-                    op: Op::Data(alu_op),
+                    op: Data(alu_op),
                 }
             }
             _ => todo!("{:?}", format),
@@ -740,6 +741,7 @@ impl Decoder {
             let is_immediate = ((instr >> 25) & 1) == 1;
             let op2 = if is_immediate {
                 let rot_imm = RotatedImmediate::from_bytes(op2.to_ne_bytes());
+                dbg!("{}", rot_imm);
                 DataOperand::RotatedImmediate(rot_imm)
             } else {
                 let shift_type = ShiftType::from_bytes(((op2 >> 5) & 0b11) as u8).unwrap();
@@ -905,13 +907,13 @@ mod tests {
     use super::*;
 
     // Instruction hex, assembly string, expected decoded instruction
-    const TEST_INSTRUCTIONS: [(u32, &str, Instruction); 7] = [
+    const TEST_INSTRUCTIONS: [(u32, &str, Instruction); 9] = [
         (
             0xe2833001,
             "add r3, r3, #1",
             Instruction {
                 condition: Condition::Al,
-                op: Op::Data(DataOp {
+                op: Data(DataOp {
                     opcode: Add,
                     operands: DataOperands {
                         op1: Some(R3),
@@ -926,7 +928,7 @@ mod tests {
             "add r3, r2, r3",
             Instruction {
                 condition: Condition::Al,
-                op: Op::Data(DataOp {
+                op: Data(DataOp {
                     opcode: Add,
                     operands: DataOperands {
                         op1: Some(R2),
@@ -941,7 +943,7 @@ mod tests {
             "sub r13, r13, #28",
             Instruction {
                 condition: Condition::Al,
-                op: Op::Data(DataOp {
+                op: Data(DataOp {
                     opcode: Sub,
                     operands: DataOperands {
                         op1: Some(RegisterName::R13),
@@ -956,7 +958,7 @@ mod tests {
             "mov r9, #4096",
             Instruction {
                 condition: Condition::Al,
-                op: Op::Data(DataOp {
+                op: Data(DataOp {
                     opcode: Mov,
                     operands: DataOperands {
                         op1: None,
@@ -971,7 +973,7 @@ mod tests {
             "adc r4, r5, #10",
             Instruction {
                 condition: Condition::Al,
-                op: Op::Data(DataOp {
+                op: Data(DataOp {
                     opcode: Adc,
                     operands: DataOperands {
                         op1: Some(R5),
@@ -986,7 +988,7 @@ mod tests {
             "and r6, r7, r8",
             Instruction {
                 condition: Condition::Al,
-                op: Op::Data(DataOp {
+                op: Data(DataOp {
                     opcode: And,
                     operands: DataOperands {
                         op1: Some(R7),
@@ -1001,9 +1003,34 @@ mod tests {
             "b 0",
             Instruction {
                 condition: Condition::Al,
-                op: Op::B {
+                op: B {
                     offset: Offset::from_24bits(0xfffffe),
                 },
+            },
+        ),
+        (
+            0xebfffffe,
+            "bl 0",
+            Instruction {
+                condition: Condition::Al,
+                op: Bl {
+                    offset: Offset::from_24bits(0xfffffe),
+                },
+            },
+        ),
+        (
+            0xe3c920aa,
+            "bic r2, r9, #170",
+            Instruction {
+                condition: Condition::Al,
+                op: Data(DataOp {
+                    opcode: Bic,
+                    operands: DataOperands {
+                        op1: Some(R9),
+                        op2: DataOperand::make_rot_imm(170, 0),
+                        dst: R2,
+                    },
+                }),
             },
         ),
     ];
