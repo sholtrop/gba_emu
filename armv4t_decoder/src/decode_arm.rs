@@ -1075,7 +1075,7 @@ mod tests {
     use super::*;
 
     // Instruction hex, assembly string, expected decoded instruction
-    const TEST_INSTRUCTIONS: [(u32, &str, Instruction); 15] = [
+    const TEST_INSTRUCTIONS: [(u32, &str, Instruction); 17] = [
         (
             0xe2833001,
             "add r3, r3, #1",
@@ -1269,6 +1269,20 @@ mod tests {
             },
         ),
         (
+            0xe9100002,
+            "ldmdb r0, {r1}",
+            Instruction {
+                condition: Condition::Al,
+                op: BlockData(Ldm(BlockDataOperands {
+                    flags: BlockDataFlags::from_bytes([0b1000]),
+                    base_reg: R0,
+                    reg_list: bitarr![
+                        const u16, Lsb0; 0, 1
+                    ],
+                })),
+            },
+        ),
+        (
             0xc9f0fffe,
             "ldmibgt r0!, {r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15}^",
             Instruction {
@@ -1282,11 +1296,21 @@ mod tests {
                 })),
             },
         ),
+        (
+            0xe80800aa,
+            "stmda r8, {r1, r3, r5, r7}",
+            Instruction {
+                condition: Condition::Al,
+                op: BlockData(Stm(BlockDataOperands {
+                    flags: BlockDataFlags::from_bytes([0b0000]),
+                    base_reg: R8,
+                    reg_list: bitarr![
+                        const u16, Lsb0; 0, 1, 0, 1, 0, 1, 0, 1
+                    ],
+                })),
+            },
+        ),
     ];
-    // write_back: B1,          // W
-    // psr_force_user_mode: B1, // S
-    // up_down: B1,             // U
-    // pre_post_indexing: B1,   // P
 
     #[test]
     fn rotated_imm_eq_test() {
