@@ -1,20 +1,20 @@
 # Mnemonics to implement
 ## ARM (32-bit)
-| Mnemonic         | Can decode         | Can execute    | Comment    |
-| :-----------:    | :-----------:      | :-----------:  | :--------: |
+| Mnemonic         | Can decode       | Can execute    | Comment    |
+| :-----------:    | :-----------:    | :-----------:  | :--------: |
 | **adc**          |    yes           |                |            |
 | **add**          |    yes           |                |            |
 | **and**          |    yes           |                |            |
 | **b**            |    yes           |                |            |
-| **bic**          |    yes       |                |            |
+| **bic**          |    yes           |                |            |
 | **bl**           |    yes           |                |            |
-| **bx**           |                  |                |            |
-| **cdp**          |                  |                |            |
-| **cmn**          |                  |                |            |
-| **cmp**          |                  |                |            |
-| **eor**          |                  |                |            |
-| **ldc**          |                  |                |            |
-| **ldm**          |                  |                |            |
+| **bx**           |    yes           |                |            |
+| **cdp**          |    skipping      |                |  GBA has no coprocessors? |
+| **cmn**          |    yes           |                |            |
+| **cmp**          |    yes           |                |            |
+| **eor**          |    yes           |                |            |
+| **ldc**          |    skipping      |                |  GBA has no coprocessors? |
+| **ldm**          |    yes           |                |            |
 | **ldr**          |                  |                |            |
 | **mcr**          |                  |                |            |
 | **mla**          |                  |                |            |
@@ -29,7 +29,7 @@
 | **rsc**          |                  |                |            |
 | **sbc**          |                  |                |            |
 | **stc**          |                  |                |            |
-| **stm**          |                  |                |            |
+| **stm**          |    yes           |                |            |
 | **str**          |                  |                |            |
 | **sub**          |    yes           |                |            |
 | **swi**          |                  |                |            |

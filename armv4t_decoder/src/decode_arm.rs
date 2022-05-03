@@ -1,6 +1,9 @@
+use bitvec::array::BitArray;
+use bitvec::order::Lsb0;
+use bitvec::{bitarr, BitArr};
 use modular_bitfield::Specifier;
 use modular_bitfield::{bitfield, specifiers::*, BitfieldSpecifier};
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 
 const INSTR_SIZE: u8 = 32;
 const COND_SIZE: u8 = 4;
@@ -105,6 +108,7 @@ pub enum RegisterName {
     R12,
     R13,
     R14,
+    R15,
 }
 
 use RegisterName::*;
@@ -127,6 +131,7 @@ impl From<u16> for RegisterName {
             12 => R12,
             13 => R13,
             14 => R14,
+            15 => R15,
             _ => panic!("Invalid register number {}", n),
         }
     }
@@ -138,21 +143,22 @@ impl Display for RegisterName {
             f,
             "r{}",
             match &self {
-                RegisterName::R0 => "0",
-                RegisterName::R1 => "1",
-                RegisterName::R2 => "2",
-                RegisterName::R3 => "3",
-                RegisterName::R4 => "4",
-                RegisterName::R5 => "5",
-                RegisterName::R6 => "6",
-                RegisterName::R7 => "7",
-                RegisterName::R8 => "8",
-                RegisterName::R9 => "9",
-                RegisterName::R10 => "10",
-                RegisterName::R11 => "11",
-                RegisterName::R12 => "12",
-                RegisterName::R13 => "13",
-                RegisterName::R14 => "14",
+                R0 => "0",
+                R1 => "1",
+                R2 => "2",
+                R3 => "3",
+                R4 => "4",
+                R5 => "5",
+                R6 => "6",
+                R7 => "7",
+                R8 => "8",
+                R9 => "9",
+                R10 => "10",
+                R11 => "11",
+                R12 => "12",
+                R13 => "13",
+                R14 => "14",
+                R15 => "15",
             }
         )
     }
@@ -216,7 +222,7 @@ impl Display for ByteOrWord {
 pub struct DataOperands {
     op1: Option<RegisterName>,
     op2: DataOperand,
-    dst: RegisterName,
+    dst: Option<RegisterName>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -248,9 +254,9 @@ pub struct DataOp {
 }
 
 impl DataOp {
-    pub fn get_operands(&self) -> (String, Option<String>, String) {
+    pub fn get_operands(&self) -> (Option<String>, Option<String>, String) {
         (
-            self.operands.dst.to_string(),
+            self.operands.dst.map(|r| r.to_string()),
             self.operands.op1.map(|o| o.to_string()),
             self.operands.op2.to_string(),
         )
@@ -281,6 +287,36 @@ impl Display for Offset {
     }
 }
 
+#[derive(Clone, Copy)]
+#[bitfield(bits = 4)]
+pub struct BlockDataFlags {
+    write_back: B1,          // W
+    psr_force_user_mode: B1, // S
+    up_down: B1,             // U
+    pre_post_indexing: B1,   // P
+}
+
+impl Debug for BlockDataFlags {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}{}{}{}",
+            self.pre_post_indexing(),
+            self.up_down(),
+            self.psr_force_user_mode(),
+            self.write_back()
+        )
+    }
+}
+
+impl PartialEq for BlockDataFlags {
+    fn eq(&self, other: &Self) -> bool {
+        self.into_bytes() == other.into_bytes()
+    }
+}
+
+impl Eq for BlockDataFlags {}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Op {
     Data(DataOp), // All Data Processing ops
@@ -292,10 +328,13 @@ pub enum Op {
     Bl {
         offset: Offset,
     },
-    Bx,  // Branch and Exchange
+    Bx {
+        reg: RegisterName,
+    }, // Branch and Exchange
     Cdp, // Coprocessor Data Processing
     Ldc, // Load coprocessor from memory
-    Ldm, // Load multiple regisers
+    // Load multiple regisers
+    BlockData(BlockDataOp),
     Ldr, // Load register from memory
     Mcr, // Move CPU register to coprocessor register
     Mrc, // Move from coprocessor register to CPU register
@@ -319,7 +358,7 @@ pub enum Op {
         op2: RegisterName,
     },
     Stc, // Store coprocessor register to memory
-    Stm, // Store multiple
+    // Stm, // Store multiple
     Str, // Store register to memory
     // Software interrupt
     Swi {
@@ -344,57 +383,56 @@ impl Display for Op {
             "{}",
             match &self {
                 Data(DataOp { opcode, .. }) => match opcode {
-                    Adc => "adc",
-                    Add => "add",
-                    And => "and",
-                    Cmn => "cmn",
-                    Cmp => "cmp",
-                    Eor => "eor",
-                    Mov => "mov",
-                    Rsb => "rsb",
-                    Rsc => "rsc",
-                    Sbc => "sbc",
-                    Sub => "sub",
-                    Orr => "orr",
-                    Teq => "teq",
-                    Tst => "tst",
-                    Bic => "bic",
-                    Mvn => "mvn",
+                    Adc => "adc".into(),
+                    Add => "add".into(),
+                    And => "and".into(),
+                    Cmn => "cmn".into(),
+                    Cmp => "cmp".into(),
+                    Eor => "eor".into(),
+                    Mov => "mov".into(),
+                    Rsb => "rsb".into(),
+                    Rsc => "rsc".into(),
+                    Sbc => "sbc".into(),
+                    Sub => "sub".into(),
+                    Orr => "orr".into(),
+                    Teq => "teq".into(),
+                    Tst => "tst".into(),
+                    Bic => "bic".into(),
+                    Mvn => "mvn".into(),
                 },
-                B { .. } => "b",
-                Bl { .. } => "bl",
-                Bx => "bx",
-                Cdp => "cdp",
-                Ldc => "ldc",
-                Ldm => "ldm",
-                Ldr => "ldr",
-                Mcr => "mcr",
-                Mrc => "mrc",
-                Mrs => "mrs",
-                Msr => "msr",
+                B { .. } => "b".into(),
+                Bl { .. } => "bl".into(),
+                Bx { .. } => "bx".into(),
+                Cdp => "cdp".into(),
+                Ldc => "ldc".into(),
+                BlockData(op) => op.to_string(),
+                Ldr => "ldr".into(),
+                Mcr => "mcr".into(),
+                Mrc => "mrc".into(),
+                Mrs => "mrs".into(),
+                Msr => "msr".into(),
                 Mul { accumulate, .. } => {
                     match accumulate {
-                        MultiplyOnly => "mul",
-                        MultiplyAndAccumulate => "mula",
+                        MultiplyOnly => "mul".into(),
+                        MultiplyAndAccumulate => "mula".into(),
                     }
                 }
                 Mull {
                     sign, accumulate, ..
                 } => {
                     match (sign, accumulate) {
-                        (Signed, MultiplyOnly) => "smull",
-                        (Unsigned, MultiplyOnly) => "umull",
-                        (Signed, MultiplyAndAccumulate) => "smlal",
-                        (Unsigned, MultiplyAndAccumulate) => "umlal",
+                        (Signed, MultiplyOnly) => "smull".into(),
+                        (Unsigned, MultiplyOnly) => "umull".into(),
+                        (Signed, MultiplyAndAccumulate) => "smlal".into(),
+                        (Unsigned, MultiplyAndAccumulate) => "umlal".into(),
                     }
                 }
 
-                Stc => "stc",
-                Stm => "stm",
-                Str => "str",
-                Swi { .. } => "swi",
-                Swp { .. } => "swp",
-                Unknown => "unknown",
+                Stc => "stc".into(),
+                Str => "str".into(),
+                Swi { .. } => "swi".into(),
+                Swp { .. } => "swp".into(),
+                Unknown => "unknown".into(),
             }
         )
     }
@@ -431,12 +469,11 @@ impl RotatedImmediate {
 
     pub fn imm_value(&self) -> u32 {
         let value = self.value() as u32;
-        dbg!("{}", value.rotate_right(self.rotate() as u32 * 2));
         value.rotate_right(self.rotate() as u32 * 2)
     }
 }
 
-impl core::fmt::Debug for RotatedImmediate {
+impl Debug for RotatedImmediate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} rot:{:b}", self.value(), self.rotate())
     }
@@ -531,6 +568,87 @@ impl From<Immediate> for Operand {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockDataOp {
+    Ldm(BlockDataOperands),
+    Stm(BlockDataOperands),
+}
+
+use BlockDataOp::*;
+
+impl Display for BlockDataOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (l, p, u) = match &self {
+            Ldm(BlockDataOperands { flags, .. }) => (1, flags.pre_post_indexing(), flags.up_down()),
+            Stm(BlockDataOperands { flags, .. }) => (0, flags.pre_post_indexing(), flags.up_down()),
+        };
+        write!(
+            f,
+            "{}",
+            match (l, p, u) {
+                (1, 1, 1) => "ldmib",
+                (1, 0, 1) => "ldmia",
+                (1, 1, 0) => "ldmdb",
+                (1, 0, 0) => "ldmda",
+                (0, 1, 1) => "stmib",
+                (0, 0, 1) => "stmia",
+                (0, 1, 0) => "stmdb",
+                (0, 0, 0) => "stmda",
+                _ => unreachable!(),
+            }
+        )
+        // write!(f, "")
+    }
+}
+
+impl BlockDataOp {
+    pub fn get_operands(&self) -> (String, String) {
+        let (write_back, set_psr, base_reg, reg_list) = match &self {
+            Ldm(BlockDataOperands {
+                base_reg,
+                flags,
+                reg_list,
+            })
+            | Stm(BlockDataOperands {
+                base_reg,
+                flags,
+                reg_list,
+            }) => {
+                let write_back = flags.write_back();
+                let set_psr = flags.psr_force_user_mode();
+                let reg_list = format!(
+                    "{{{}}}",
+                    reg_list
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(reg, reg_bit)| {
+                            if reg_bit == true {
+                                Some(RegisterName::from(reg as u16).to_string())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                );
+                (write_back, set_psr, base_reg, reg_list)
+            }
+        };
+        let op1 = format!("{}{}", base_reg, if write_back == 1 { "!" } else { "" });
+        let op2 = format!("{}{}", reg_list, if set_psr == 1 { "^" } else { "" });
+        (op1, op2)
+    }
+}
+
+type RegisterBitArr = BitArr!(for 16, in u16, Lsb0);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlockDataOperands {
+    flags: BlockDataFlags,
+    base_reg: RegisterName,
+    reg_list: RegisterBitArr, // Each bit corresponds to a register
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Instruction {
     condition: Condition,
     op: Op,
@@ -548,7 +666,7 @@ impl Instruction {
         match self.op {
             Data(op) => {
                 let (dst, op1, op2) = op.get_operands();
-                (Some(dst), op1, Some(op2), None)
+                (dst, op1, Some(op2), None)
             }
             Mull {
                 dest_low,
@@ -568,9 +686,14 @@ impl Instruction {
                 Some(base.to_string()),
                 None,
             ),
+            BlockData(op) => {
+                let (op1, op2) = op.get_operands();
+                (None, Some(op1), Some(op2), None)
+            }
             B { offset } | Bl { offset } => (Some(offset.0.to_string()), None, None, None),
+            Bx { reg } => (Some(reg.to_string()), None, None, None),
             Swi { comment_field } => (Some(comment_field.to_string()), None, None, None),
-            _ => (None, None, None, None),
+            _ => todo!("{}", self.op),
         }
     }
 }
@@ -587,6 +710,13 @@ impl Display for Instruction {
         match self.get_operands() {
             (None, None, None, None) => {
                 write!(f, "{}{}{}", self.op, self.condition, extra_letter)
+            }
+            (None, Some(op1), Some(op2), None) => {
+                write!(
+                    f,
+                    "{}{}{} {}, {}",
+                    self.op, self.condition, extra_letter, op1, op2
+                )
             }
             (Some(dest), None, None, None) => {
                 write!(f, "{}{}{} {}", self.op, self.condition, extra_letter, dest)
@@ -679,6 +809,13 @@ impl Decoder {
     fn get_instr(format: OpFormat, instr: u32) -> Instruction {
         let condition = Decoder::get_condition(instr);
         match format {
+            OpFormat::BranchAndBranchExchange => {
+                let reg = RegisterName::from((instr & 0b1111) as u16);
+                Instruction {
+                    condition,
+                    op: Bx { reg },
+                }
+            }
             OpFormat::BranchAndBranchWithLink => {
                 let link_bit = instr >> 24 & 1;
                 let offset = instr & ((1 << 24) - 1);
@@ -699,13 +836,37 @@ impl Decoder {
                 }
             }
             OpFormat::DataProcessing => {
-                let alu_op = Decoder::get_data_op(instr);
+                let data_op = Decoder::get_data_op(instr);
                 Instruction {
                     condition,
-                    op: Data(alu_op),
+                    op: Data(data_op),
+                }
+            }
+            OpFormat::BlockDataTransfer => {
+                let op = Decoder::get_block_data_op(instr);
+                Instruction {
+                    condition,
+                    op: BlockData(op),
                 }
             }
             _ => todo!("{:?}", format),
+        }
+    }
+
+    fn get_block_data_op(instr: u32) -> BlockDataOp {
+        let base_reg = RegisterName::from((instr >> 16 & 0b1111) as u16);
+        let flags = BlockDataFlags::from_bytes([(instr >> 21 & 0b1111) as u8]);
+        let reg_list = RegisterBitArr::new([(instr & ((1 << 16) - 1)) as u16]);
+        let operands = BlockDataOperands {
+            base_reg,
+            flags,
+            reg_list,
+        };
+        let is_load = instr >> 20 & 1 == 1;
+        if is_load {
+            BlockDataOp::Ldm(operands)
+        } else {
+            BlockDataOp::Stm(operands)
         }
     }
 
@@ -737,25 +898,30 @@ impl Decoder {
                 let bits = ((instr >> 16) & 0b1111) as u16;
                 Some(RegisterName::from(bits))
             };
-            let op2 = (instr & ((1 << 12) - 1)) as u16;
-            let is_immediate = ((instr >> 25) & 1) == 1;
-            let op2 = if is_immediate {
-                let rot_imm = RotatedImmediate::from_bytes(op2.to_ne_bytes());
-                dbg!("{}", rot_imm);
-                DataOperand::RotatedImmediate(rot_imm)
-            } else {
-                let shift_type = ShiftType::from_bytes(((op2 >> 5) & 0b11) as u8).unwrap();
-                let shift_source = ShiftSource::from(op2);
-                let reg = op2 & 0b1111;
-                let op2 = ShiftRegister {
-                    name: reg.into(),
-                    shift: (shift_source, shift_type),
-                };
-                DataOperand::ShiftRegister(op2)
-            };
 
-            let dst = ((instr >> 12) & 0b1111) as u16;
-            let dst = RegisterName::from(dst);
+            let op2 = {
+                let op2_bits = (instr & ((1 << 12) - 1)) as u16;
+                let is_immediate = ((instr >> 25) & 1) == 1;
+                if is_immediate {
+                    let rot_imm = RotatedImmediate::from_bytes(op2_bits.to_ne_bytes());
+                    DataOperand::RotatedImmediate(rot_imm)
+                } else {
+                    let shift_type = ShiftType::from_bytes(((op2_bits >> 5) & 0b11) as u8).unwrap();
+                    let shift_source = ShiftSource::from(op2_bits);
+                    let reg = op2_bits & 0b1111;
+                    let op2 = ShiftRegister {
+                        name: reg.into(),
+                        shift: (shift_source, shift_type),
+                    };
+                    DataOperand::ShiftRegister(op2)
+                }
+            };
+            let dst = if !(matches!(opcode, Cmp | Cmn | Teq | Tst)) {
+                let dst_bits = ((instr >> 12) & 0b1111) as u16;
+                Some(RegisterName::from(dst_bits))
+            } else {
+                None
+            };
             DataOperands { dst, op1, op2 }
         };
         DataOp { opcode, operands }
@@ -904,10 +1070,12 @@ impl Decoder {
 
 #[cfg(test)]
 mod tests {
+    use bitvec::bitarr;
+
     use super::*;
 
     // Instruction hex, assembly string, expected decoded instruction
-    const TEST_INSTRUCTIONS: [(u32, &str, Instruction); 9] = [
+    const TEST_INSTRUCTIONS: [(u32, &str, Instruction); 15] = [
         (
             0xe2833001,
             "add r3, r3, #1",
@@ -918,7 +1086,7 @@ mod tests {
                     operands: DataOperands {
                         op1: Some(R3),
                         op2: DataOperand::make_rot_imm(1, 0),
-                        dst: R3,
+                        dst: Some(R3),
                     },
                 }),
             },
@@ -933,7 +1101,7 @@ mod tests {
                     operands: DataOperands {
                         op1: Some(R2),
                         op2: DataOperand::make_shift_reg_noshift(R3),
-                        dst: R3,
+                        dst: Some(R3),
                     },
                 }),
             },
@@ -948,7 +1116,7 @@ mod tests {
                     operands: DataOperands {
                         op1: Some(RegisterName::R13),
                         op2: DataOperand::make_rot_imm(28, 0),
-                        dst: R13,
+                        dst: Some(R13),
                     },
                 }),
             },
@@ -963,7 +1131,7 @@ mod tests {
                     operands: DataOperands {
                         op1: None,
                         op2: DataOperand::make_rot_imm(1, 0b1010),
-                        dst: R9,
+                        dst: Some(R9),
                     },
                 }),
             },
@@ -978,7 +1146,7 @@ mod tests {
                     operands: DataOperands {
                         op1: Some(R5),
                         op2: DataOperand::make_rot_imm(10, 0),
-                        dst: R4,
+                        dst: Some(R4),
                     },
                 }),
             },
@@ -993,7 +1161,7 @@ mod tests {
                     operands: DataOperands {
                         op1: Some(R7),
                         op2: DataOperand::make_shift_reg_noshift(R8),
-                        dst: R6,
+                        dst: Some(R6),
                     },
                 }),
             },
@@ -1028,12 +1196,97 @@ mod tests {
                     operands: DataOperands {
                         op1: Some(R9),
                         op2: DataOperand::make_rot_imm(170, 0),
-                        dst: R2,
+                        dst: Some(R2),
                     },
                 }),
             },
         ),
+        (
+            0x112fff12,
+            "bxne r2",
+            Instruction {
+                condition: Condition::Ne,
+                op: Bx { reg: R2 },
+            },
+        ),
+        (
+            0x03720010,
+            "cmneq r2, #16",
+            Instruction {
+                condition: Condition::Eq,
+                op: Data(DataOp {
+                    opcode: Cmn,
+                    operands: DataOperands {
+                        dst: None,
+                        op1: Some(R2),
+                        op2: DataOperand::make_rot_imm(16, 0),
+                    },
+                }),
+            },
+        ),
+        (
+            0x93540000,
+            "cmpls r4, #0",
+            Instruction {
+                condition: Condition::Ls,
+                op: Data(DataOp {
+                    opcode: Cmp,
+                    operands: DataOperands {
+                        dst: None,
+                        op1: Some(R4),
+                        op2: DataOperand::make_rot_imm(0, 0),
+                    },
+                }),
+            },
+        ),
+        (
+            0x42221012,
+            "eormi r1, r2, #18",
+            Instruction {
+                condition: Condition::Mi,
+                op: Data(DataOp {
+                    opcode: Eor,
+                    operands: DataOperands {
+                        dst: Some(R1),
+                        op1: Some(R2),
+                        op2: DataOperand::make_rot_imm(18, 0),
+                    },
+                }),
+            },
+        ),
+        (
+            0x08417c00,
+            "stmdaeq r1, {r10, r11, r12, r13, r14}^",
+            Instruction {
+                condition: Condition::Eq,
+                op: BlockData(Stm(BlockDataOperands {
+                    flags: BlockDataFlags::from_bytes([0b0010]),
+                    base_reg: R1,
+                    reg_list: bitarr![
+                        const u16, Lsb0; 0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,0
+                    ],
+                })),
+            },
+        ),
+        (
+            0xc9f0fffe,
+            "ldmibgt r0!, {r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15}^",
+            Instruction {
+                condition: Condition::Gt,
+                op: BlockData(Ldm(BlockDataOperands {
+                    flags: BlockDataFlags::from_bytes([0b1111]),
+                    base_reg: R0,
+                    reg_list: bitarr![
+                        const u16, Lsb0; 0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+                    ],
+                })),
+            },
+        ),
     ];
+    // write_back: B1,          // W
+    // psr_force_user_mode: B1, // S
+    // up_down: B1,             // U
+    // pre_post_indexing: B1,   // P
 
     #[test]
     fn rotated_imm_eq_test() {
