@@ -14,29 +14,231 @@ pub mod instr {
     use std::fmt::{Debug, Display};
 
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-    enum Instruction {
-        BranchAndBranchExchange(u32),
-        BlockDataTransfer(u32),
-        BranchAndBranchWithLink(u32),
-        SoftwareInterrupt(u32),
+    pub enum Instruction {
+        BranchAndExchange(branch_and_exchange::Op),
+        BlockDataTransfer(block_data_transfer::Op),
+        BranchAndBranchWithLink(branch_and_link::Op),
+        SoftwareInterrupt(software_interrupt::Op),
         Undefined(u32),
         SingleDataTransfer(u32),
         SingleDataSwap(u32),
         HalfwordDataTransferRegister(u32),
         HalfwordDataTransferImmediate(u32),
-        Multiply(u32),
+        Multiply(multiply::Op),
+        MultiplyLong(multiply_long::Op),
         PsrTransferMrs(u32),
         PsrTransferMsr(u32),
         DataProcessing(data_processing::Op), // ALU instructions
         Unimplemented(u32),
     }
 
+    use Instruction::*;
+
     impl Instruction {
         pub fn decode(instr: u32) -> Self {
-            if data_processing::instr_is_data_processing(instr) {
-                Self::DataProcessing(data_processing::create_op(instr))
+            // if Decoder::is_branch_and_branch_exchange(instr) {
+            //     OpFormat::BranchAndBranchExchange
+            // } else if Decoder::is_block_data_transfer(instr) {
+            //     OpFormat::BlockDataTransfer
+            // } else if Decoder::is_branch_and_branch_with_link(instr) {
+            //     OpFormat::BranchAndBranchWithLink
+            // } else if Decoder::is_software_interrupt(instr) {
+            //     OpFormat::SoftwareInterrupt
+            // } else if Decoder::is_undefined(instr) {
+            //     OpFormat::Undefined
+            // } else if Decoder::is_single_data_transfer(instr) {
+            //     OpFormat::SingleDataTransfer
+            // } else if Decoder::is_single_data_swap(instr) {
+            //     OpFormat::SingleDataSwap
+            // } else if Decoder::is_halfword_data_transfer_register(instr) {
+            //     OpFormat::HalfwordDataTransferRegister
+            // } else if Decoder::is_halfword_data_transfer_immediate(instr) {
+            //     OpFormat::HalfwordDataTransferImmediate
+            // } else if Decoder::is_multiply(instr) {
+            //     OpFormat::Multiply
+            // } else if Decoder::is_psr_transfer_mrs(instr) {
+            //     OpFormat::PsrTransferMrs
+            // } else if Decoder::is_psr_transfer_msr(instr) {
+            //     OpFormat::PsrTransferMsr
+            // } else if Decoder::is_data_processing(instr) {
+
+            if branch_and_exchange::is_branch_and_exchange(instr) {
+                BranchAndExchange(branch_and_exchange::parse(instr))
+            } else if block_data_transfer::is_block_data_transfer(instr) {
+                BlockDataTransfer(block_data_transfer::parse(instr))
+            } else if branch_and_link::is_branch_and_link(instr) {
+                BranchAndBranchWithLink(branch_and_link::parse(instr))
+            } else if software_interrupt::is_swi(instr) {
+                SoftwareInterrupt(software_interrupt::parse(instr))
+            } else if multiply::is_multiply(instr) {
+                Multiply(multiply::parse(instr))
+            } else if data_processing::is_data_processing(instr) {
+                DataProcessing(data_processing::parse(instr))
             } else {
                 todo!("other instructions")
+            }
+        }
+
+        pub fn get_operands(
+            &self,
+        ) -> (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ) {
+            use OpCode::*;
+
+            match &self {
+                DataProcessing(op) => {
+                    let operand2 = if op.is_imm_operand() {
+                        Some(op.operand2().as_rot_imm().to_string())
+                    } else {
+                        Some(op.operand2().as_shift_reg().to_string())
+                    };
+                    match op.op() {
+                        Mov | Mvn => (Some(op.dest_reg().to_string()), operand2, None, None),
+                        Cmp | Cmn | Teq | Tst => {
+                            (Some(op.operand1().to_string()), operand2, None, None)
+                        }
+                        _ => (
+                            Some(op.dest_reg().to_string()),
+                            Some(op.operand1().to_string()),
+                            operand2,
+                            None,
+                        ),
+                    }
+                }
+                BranchAndExchange(op) => {
+                    let rn = Some(op.rn().to_string());
+                    (rn, None, None, None)
+                }
+                BranchAndBranchWithLink(op) => {
+                    let offset = Some(op.offset().to_string());
+                    (offset, None, None, None)
+                }
+                SoftwareInterrupt(op) => {
+                    let comment = Some(op.comment().to_string());
+                    (comment, None, None, None)
+                }
+                BlockDataTransfer(op) => {
+                    let write_back = op.write_back();
+                    let set_psr = op.psr_force_user();
+                    let base_reg = op.base_reg().to_string();
+                    let reg_list = op.reg_list();
+
+                    let op1 = format!("{}{}", base_reg, if write_back { "!" } else { "" });
+                    let op2 = format!("{}{}", reg_list, if set_psr { "^" } else { "" });
+                    (Some(op1), Some(op2), None, None)
+                }
+                _ => todo!("Other instructions' operands' string representations"),
+            }
+        }
+
+        pub fn op_mnemonic(&self) -> String {
+            use block_data_transfer::LoadOrStore::*;
+            use block_data_transfer::PreOrPostIndexing::*;
+            use block_data_transfer::UpOrDown::*;
+
+            match self {
+                BranchAndExchange(_) => "bx".into(),
+                BranchAndBranchWithLink(op) => match op.link() {
+                    true => "bl".into(),
+                    false => "b".into(),
+                },
+                Multiply(op) => match op.accumulate() {
+                    AccumulateType::MultiplyAndAccumulate => "mla".into(),
+                    AccumulateType::MultiplyOnly => "mul".into(),
+                },
+                MultiplyLong(op) => match op.accumulate() {
+                    AccumulateType::MultiplyAndAccumulate => "mlal".into(),
+                    AccumulateType::MultiplyOnly => "mull".into(),
+                },
+                DataProcessing(op) => op.op().to_string(),
+                SoftwareInterrupt(_) => "swi".into(),
+                BlockDataTransfer(op) => match op.load_store() {
+                    Load => match (op.pre_post_indexing(), op.up_down()) {
+                        (Pre, Up) => "ldmib",
+                        (Post, Up) => "ldmia",
+                        (Pre, Down) => "ldmdb",
+                        (Post, Down) => "ldmda",
+                    }
+                    .into(),
+                    Store => match (op.pre_post_indexing(), op.up_down()) {
+                        (Pre, Up) => "stmib",
+                        (Post, Up) => "stmia",
+                        (Pre, Down) => "stmdb",
+                        (Post, Down) => "stmda",
+                    }
+                    .into(),
+                },
+                _ => todo!("other mnemonics"),
+            }
+        }
+
+        pub fn condition(&self) -> Condition {
+            match self {
+                BranchAndExchange(op) => op.condition(),
+                BlockDataTransfer(op) => op.condition(),
+                BranchAndBranchWithLink(op) => op.condition(),
+                SoftwareInterrupt(op) => op.condition(),
+                // Undefined(op) => op.condition(),
+                // SingleDataTransfer(op) => op.condition(),
+                // SingleDataSwap(op) => op.condition(),
+                // HalfwordDataTransferRegister(op) => op.condition(),
+                // HalfwordDataTransferImmediate(op) => op.condition(),
+                Multiply(op) => op.condition(),
+                MultiplyLong(op) => op.condition(),
+                // PsrTransferMrs(op) => op.condition(),
+                // PsrTransferMsr(op) => op.condition(),
+                DataProcessing(op) => op.condition(),
+                // Unimplemented(op) => op.condition(),
+                _ => todo!("other ops' conditions"),
+            }
+        }
+    }
+
+    impl Display for Instruction {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            // Certain instructions can add an extra letter to the mnemonic.
+            // E.g. MUL can become MULEQS with condition code EQ and set_condition=true
+            let extra_letter = match &self {
+                Multiply(op) => op.set_condition_codes().to_string(),
+                MultiplyLong(op) => op.set_condition_codes().to_string(),
+                // Swp { size, .. } => size.to_string(),
+                _ => "".into(),
+            };
+            let op = self.op_mnemonic();
+            let condition = self.condition();
+            match self.get_operands() {
+                (None, None, None, None) => {
+                    write!(f, "{}{}{}", op, condition, extra_letter)
+                }
+                (None, Some(op1), Some(op2), None) => {
+                    write!(f, "{}{}{} {}, {}", op, condition, extra_letter, op1, op2)
+                }
+                (Some(dest), None, None, None) => {
+                    write!(f, "{}{}{} {}", op, condition, extra_letter, dest)
+                }
+                // op1=None and op2=Some can happen, but not vice-versa
+                (Some(dest), None, Some(op2), None) => {
+                    write!(f, "{}{}{} {}, {}", op, condition, extra_letter, dest, op2,)
+                }
+                (Some(dest), Some(op1), Some(op2), None) => {
+                    write!(
+                        f,
+                        "{}{}{} {}, {}, {}",
+                        op, condition, extra_letter, dest, op1, op2
+                    )
+                }
+                (Some(dest), Some(op1), Some(op2), Some(op3)) => {
+                    write!(
+                        f,
+                        "{}{}{} {}, {}, {}, {}",
+                        op, condition, extra_letter, dest, op1, op2, op3
+                    )
+                }
+                _ => unreachable!("A previous Operand was `None`"),
             }
         }
     }
@@ -61,6 +263,32 @@ pub mod instr {
         Al = 0b1110, // Always - Instruction is always executed
     }
 
+    impl Display for Condition {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(
+                f,
+                "{}",
+                match &self {
+                    Condition::Eq => "eq",
+                    Condition::Ne => "ne",
+                    Condition::Cs => "cs",
+                    Condition::Cc => "cc",
+                    Condition::Mi => "mi",
+                    Condition::Pl => "pl",
+                    Condition::Vs => "vs",
+                    Condition::Vc => "vc",
+                    Condition::Hi => "hi",
+                    Condition::Ls => "ls",
+                    Condition::Ge => "ge",
+                    Condition::Lt => "lt",
+                    Condition::Gt => "gt",
+                    Condition::Le => "le",
+                    Condition::Al => "",
+                }
+            )
+        }
+    }
+
     #[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
     #[bits = 4]
     pub enum RegisterName {
@@ -83,6 +311,31 @@ pub mod instr {
     }
 
     use RegisterName::*;
+
+    use self::data_processing::OpCode;
+
+    impl From<RegisterName> for u8 {
+        fn from(reg: RegisterName) -> Self {
+            match reg {
+                R0 => 0,
+                R1 => 1,
+                R2 => 2,
+                R3 => 3,
+                R4 => 4,
+                R5 => 5,
+                R6 => 6,
+                R7 => 7,
+                R8 => 8,
+                R9 => 9,
+                R10 => 10,
+                R11 => 11,
+                R12 => 12,
+                R13 => 13,
+                R14 => 14,
+                R15 => 15,
+            }
+        }
+    }
 
     impl From<u8> for RegisterName {
         fn from(n: u8) -> Self {
@@ -135,10 +388,17 @@ pub mod instr {
         }
     }
 
+    #[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
+    #[bits = 1]
+    pub enum AccumulateType {
+        MultiplyOnly,
+        MultiplyAndAccumulate,
+    }
+
     pub mod data_processing {
         use super::*;
 
-        pub fn instr_is_data_processing(instr: u32) -> bool {
+        pub fn is_data_processing(instr: u32) -> bool {
             let data_processing_format = 0b0000_0000_0000_0000_0000_0000_0000_0000;
 
             let format_mask = 0b0000_1100_0000_0000_0000_0000_0000_0000;
@@ -148,7 +408,7 @@ pub mod instr {
             extracted_format == data_processing_format
         }
 
-        pub fn create_op(instr: u32) -> Op {
+        pub fn parse(instr: u32) -> Op {
             Op::from_bytes(instr.to_le_bytes())
         }
 
@@ -187,25 +447,62 @@ pub mod instr {
         #[bitfield(bits = 12)]
         #[derive(Clone, Copy, PartialEq, Eq, Debug)]
         pub struct ShiftRegister {
-            #[skip]
-            ignored: B4,
+            reg: RegisterName,
             shift_amt_in_reg: bool,
             #[bits = 2]
             shift_type: ShiftType,
             shift_src: B5,
         }
 
+        impl Display for ShiftRegister {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                // TODO: also display the shift?
+                write!(f, "{}", self.reg())
+            }
+        }
+
         #[bitfield(bits = 12)]
         #[derive(Clone, Copy, PartialEq, Eq, Debug)]
         pub struct RotatedImmediate {
-            value: B8,  // To be zero-extended to 32 bits
-            rotate: B4, // `value` is right-rotated by twice this amount
+            val: B8,      // To be zero-extended to 32 bits
+            rotation: B4, // `value` is right-rotated by twice this amount
+        }
+
+        impl RotatedImmediate {
+            pub fn value(&self) -> u32 {
+                let value = self.val() as u32;
+                value.rotate_right(self.rotation() as u32 * 2)
+            }
+
+            pub const fn new_imm(value: u8, rotate: u8) -> Self {
+                Self {
+                    bytes: [value, rotate],
+                }
+            }
+        }
+
+        impl Display for RotatedImmediate {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", self.value())
+            }
         }
 
         #[bitfield(bits = 12)]
         #[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
         pub struct Operand {
             data: B12,
+        }
+
+        impl From<RotatedImmediate> for Operand {
+            fn from(imm: RotatedImmediate) -> Self {
+                Self::from_bytes(imm.into_bytes())
+            }
+        }
+
+        impl From<ShiftRegister> for Operand {
+            fn from(sr: ShiftRegister) -> Self {
+                Self::from_bytes(sr.into_bytes())
+            }
         }
 
         impl Operand {
@@ -221,14 +518,15 @@ pub mod instr {
         #[bitfield(bits = 32)]
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         pub struct Op {
-            operand2: Operand,
-            dest_reg: RegisterName,
-            operand1: RegisterName,
-            set_cond: bool,
-            op: OpCode,
-            is_imm_operand: bool,
+            pub operand2: Operand,
+            pub dest_reg: RegisterName,
+            pub operand1: RegisterName,
+            pub set_cond: bool,
+            pub op: OpCode,
+            pub is_imm_operand: bool,
+            #[skip]
             ignored: B2,
-            condition: Condition,
+            pub condition: Condition,
         }
 
         #[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
@@ -250,6 +548,280 @@ pub mod instr {
             Mov, // Move register or constant
             Bic, // Bit clear
             Mvn, // Move negative register
+        }
+
+        impl Display for OpCode {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                use OpCode::*;
+                write!(
+                    f,
+                    "{}",
+                    match self {
+                        And => "and",
+                        Eor => "eor",
+                        Sub => "sub",
+                        Rsb => "rsb",
+                        Add => "add",
+                        Adc => "adc",
+                        Sbc => "sbc",
+                        Rsc => "rsc",
+                        Tst => "tst",
+                        Teq => "teq",
+                        Cmp => "cmp",
+                        Cmn => "cmn",
+                        Orr => "orr",
+                        Mov => "mov",
+                        Bic => "bic",
+                        Mvn => "mvn",
+                    }
+                )
+            }
+        }
+    }
+
+    pub mod multiply {
+        use super::*;
+
+        pub fn is_multiply(instr: u32) -> bool {
+            let multiply_format = 0b0000_0000_0000_0000_0000_0000_1001_0000;
+            let format_mask = 0b0000_1111_1000_0000_0000_0000_1111_0000;
+            let extracted_format = instr & format_mask;
+            extracted_format == multiply_format
+        }
+
+        pub fn parse(instr: u32) -> multiply::Op {
+            Op::from_bytes(instr.to_le_bytes())
+        }
+
+        #[bitfield(bits = 32)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub struct Op {
+            pub rm: RegisterName,
+            #[skip]
+            ignored: B4, // 1001
+            pub rs: RegisterName,
+            pub rn: RegisterName,
+            pub reg_dest: RegisterName,
+            pub set_condition_codes: bool,
+            pub accumulate: AccumulateType,
+            #[skip]
+            ignored2: B6, // 000000
+            pub condition: Condition,
+        }
+    }
+
+    pub mod multiply_long {
+        use super::*;
+
+        pub fn is_multiply_long(instr: u32) -> bool {
+            let multiply_long_format = 0b0000_0000_1000_0000_0000_0000_1001_0000;
+            let format_mask = 0b0000_1111_1000_0000_0000_0000_1111_0000;
+            let extracted_format = instr & format_mask;
+            extracted_format == multiply_long_format
+        }
+
+        pub fn parse(instr: u32) -> Op {
+            Op::from_bytes(instr.to_le_bytes())
+        }
+
+        #[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
+        #[bits = 1]
+        pub enum Signedness {
+            Signed,
+            Unsigned,
+        }
+
+        #[bitfield(bits = 32)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub struct Op {
+            pub rm: RegisterName,
+            #[skip]
+            ignored: B4, // 1001
+            pub rs: RegisterName,
+            pub reg_dest_lo: RegisterName,
+            pub reg_dest_hi: RegisterName,
+            pub set_condition_codes: bool,
+            pub accumulate: AccumulateType,
+            pub signedness: Signedness,
+            #[skip]
+            ignored2: B5,
+            pub condition: Condition,
+        }
+    }
+
+    pub mod branch_and_exchange {
+        use super::*;
+
+        pub fn is_branch_and_exchange(instr: u32) -> bool {
+            let branch_and_exchange_format = 0b0000_0001_0010_1111_1111_1111_0001_0000;
+            let format_mask = 0b0000_1111_1111_1111_1111_1111_1111_0000;
+            let extracted_format = instr & format_mask;
+            extracted_format == branch_and_exchange_format
+        }
+
+        pub fn parse(instr: u32) -> Op {
+            Op::from_bytes(instr.to_le_bytes())
+        }
+
+        #[bitfield(bits = 32)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub struct Op {
+            pub rn: RegisterName,
+            #[skip]
+            ignored: B24,
+            pub condition: Condition,
+        }
+
+        pub enum CpuMode {
+            Arm,
+            Thumb,
+        }
+
+        impl Op {
+            pub fn switch_mode_to(&self) -> CpuMode {
+                use CpuMode::*;
+                if u8::from(self.rn()) & 1 == 1 {
+                    Thumb
+                } else {
+                    Arm
+                }
+            }
+        }
+    }
+
+    pub mod branch_and_link {
+        use super::*;
+
+        pub fn is_branch_and_link(instr: u32) -> bool {
+            let branch_format = 0b0000_1010_0000_0000_0000_0000_0000_0000;
+            let branch_with_link_format = 0b0000_1011_0000_0000_0000_0000_0000_0000;
+            let format_mask = 0b0000_1111_0000_0000_0000_0000_0000_0000;
+            let extracted_format = instr & format_mask;
+            extracted_format == branch_format || extracted_format == branch_with_link_format
+        }
+
+        pub fn parse(instr: u32) -> Op {
+            Op::from_bytes(instr.to_le_bytes())
+        }
+
+        #[bitfield(bits = 32)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub struct Op {
+            pub offset: B24,
+            pub link: bool,
+            #[skip]
+            ignored: B3,
+            pub condition: Condition,
+        }
+    }
+
+    pub mod software_interrupt {
+        use super::*;
+
+        pub fn is_swi(instr: u32) -> bool {
+            let software_interrupt_format = 0b0000_1111_0000_0000_0000_0000_0000_0000;
+            let format_mask = 0b0000_1111_0000_0000_0000_0000_0000_0000;
+            let extracted_format = instr & format_mask;
+            extracted_format == software_interrupt_format
+        }
+
+        pub fn parse(instr: u32) -> Op {
+            Op::from_bytes(instr.to_le_bytes())
+        }
+
+        #[bitfield(bits = 32)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub struct Op {
+            pub comment: B24,
+            #[skip]
+            ignored: B4,
+            pub condition: Condition,
+        }
+    }
+
+    pub mod block_data_transfer {
+        use bitvec::{order::Lsb0, view::BitView};
+
+        use super::*;
+
+        pub fn is_block_data_transfer(instr: u32) -> bool {
+            let block_data_transfer_format = 0b0000_1000_0000_0000_0000_0000_0000_0000;
+            let format_mask = 0b0000_1110_0000_0000_0000_0000_0000_0000;
+            let extracted_format = instr & format_mask;
+            extracted_format == block_data_transfer_format
+        }
+
+        pub fn parse(instr: u32) -> Op {
+            Op::from_bytes(instr.to_le_bytes())
+        }
+
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, BitfieldSpecifier)]
+        #[bits = 1]
+        pub enum LoadOrStore {
+            Store,
+            Load,
+        }
+
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, BitfieldSpecifier)]
+        #[bits = 1]
+        pub enum UpOrDown {
+            Down, // Subtract offset from base
+            Up,   // Add offset to base
+        }
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, BitfieldSpecifier)]
+        #[bits = 1]
+        pub enum PreOrPostIndexing {
+            Post, // Add offset after transfer
+            Pre,  // Add offset before transfer
+        }
+
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub struct RegisterList(u16);
+
+        impl Display for RegisterList {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(
+                    f,
+                    "{}",
+                    self.0
+                        .view_bits()
+                        .iter()
+                        .enumerate()
+                        .filter_map(
+                            |(reg, reg_bit): (usize, bitvec::ptr::BitRef<'_, _, _, Lsb0>)| {
+                                if *reg_bit {
+                                    Some(RegisterName::from(reg as u8).to_string())
+                                } else {
+                                    None
+                                }
+                            }
+                        )
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                )
+            }
+        }
+
+        #[bitfield(bits = 32)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub struct Op {
+            pub regs: u16,
+            pub base_reg: RegisterName,
+            pub load_store: LoadOrStore,
+            pub write_back: bool,
+            pub psr_force_user: bool,
+            pub up_down: UpOrDown,
+            pub pre_post_indexing: PreOrPostIndexing,
+            #[skip]
+            ignored: B3,
+            pub condition: Condition,
+        }
+
+        impl Op {
+            pub fn reg_list(&self) -> RegisterList {
+                let regs = self.regs();
+                RegisterList(regs)
+            }
         }
     }
 }
@@ -1382,7 +1954,7 @@ impl Decoder {
 mod tests {
     use bitvec::bitarr;
 
-    use super::*;
+    use super::{instr::data_processing, *};
 
     // Instruction hex, assembly string, expected decoded instruction
     const TEST_INSTRUCTIONS: [(u32, &str, Instruction); 17] = [
@@ -1643,17 +2215,17 @@ mod tests {
         assert_eq!(RotatedImmediate::new_imm(1, 0b1010).imm_value(), 4096)
     }
 
-    #[test]
-    fn decode_instructions_test() {
-        for (instr, _, expect_decoded) in TEST_INSTRUCTIONS.into_iter() {
-            let actual_decoded = Decoder::decode(instr);
-            assert_eq!(
-                expect_decoded, actual_decoded,
-                "\nEXPECTED:\n{:#?}\n\nACTUAL:\n{:#?}",
-                expect_decoded, actual_decoded
-            );
-        }
-    }
+    // #[test]
+    // fn decode_instructions_test() {
+    //     for (instr, _, expect_decoded) in TEST_INSTRUCTIONS.into_iter() {
+    //         let actual_decoded = Decoder::decode(instr);
+    //         assert_eq!(
+    //             expect_decoded, actual_decoded,
+    //             "\nEXPECTED:\n{:#?}\n\nACTUAL:\n{:#?}",
+    //             expect_decoded, actual_decoded
+    //         );
+    //     }
+    // }
 
     #[test]
     fn stringify_instructions_test() {
@@ -1666,4 +2238,41 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn decode_instructions_test() {
+        use instr::data_processing::OpCode::*;
+        use instr::data_processing::RotatedImmediate;
+        use instr::RegisterName::*;
+        use instr::*;
+
+        let add_instr: u32 = 0xe2833001;
+        let expected_decoded = Instruction::DataProcessing(
+            data_processing::Op::new()
+                .with_condition(Condition::Al)
+                .with_op(Add)
+                .with_operand1(R3)
+                .with_operand2(RotatedImmediate::new_imm(1, 0).into())
+                .with_is_imm_operand(true)
+                .with_dest_reg(R3),
+        );
+        let actual_decoded = Instruction::decode(add_instr);
+        assert_eq!(expected_decoded, actual_decoded);
+    }
+    /*
+         0xe2833001,
+            "add r3, r3, #1",
+            Instruction {
+                condition: Condition::Al,
+                op: Data(DataOp {
+                    opcode: Add,
+                    operands: DataOperands {
+                        op1: Some(R3),
+                        op2: DataOperand::make_rot_imm(1, 0),
+                        dst: Some(R3),
+                    },
+                }),
+            },
+
+    */
 }
