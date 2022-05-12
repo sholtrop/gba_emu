@@ -1,12 +1,259 @@
-use bitvec::array::BitArray;
 use bitvec::order::Lsb0;
-use bitvec::{bitarr, BitArr};
+use bitvec::BitArr;
 use modular_bitfield::Specifier;
 use modular_bitfield::{bitfield, specifiers::*, BitfieldSpecifier};
 use std::fmt::{Debug, Display};
 
-const INSTR_SIZE: u8 = 32;
+const INSTR_BIT_SIZE: u8 = 32;
 const COND_SIZE: u8 = 4;
+
+/////// REWRITE /////
+pub mod instr {
+    use modular_bitfield::Specifier;
+    use modular_bitfield::{bitfield, specifiers::*, BitfieldSpecifier};
+    use std::fmt::{Debug, Display};
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum Instruction {
+        BranchAndBranchExchange(u32),
+        BlockDataTransfer(u32),
+        BranchAndBranchWithLink(u32),
+        SoftwareInterrupt(u32),
+        Undefined(u32),
+        SingleDataTransfer(u32),
+        SingleDataSwap(u32),
+        HalfwordDataTransferRegister(u32),
+        HalfwordDataTransferImmediate(u32),
+        Multiply(u32),
+        PsrTransferMrs(u32),
+        PsrTransferMsr(u32),
+        DataProcessing(data_processing::Op), // ALU instructions
+        Unimplemented(u32),
+    }
+
+    impl Instruction {
+        pub fn decode(instr: u32) -> Self {
+            if data_processing::instr_is_data_processing(instr) {
+                Self::DataProcessing(data_processing::create_op(instr))
+            } else {
+                todo!("other instructions")
+            }
+        }
+    }
+
+    #[derive(BitfieldSpecifier, Debug, Clone, Copy, PartialEq, Eq)]
+    #[bits = 4]
+    pub enum Condition {
+        Eq = 0b0000, // Z set
+        Ne = 0b0001, // Z clear
+        Cs = 0b0010, // C set
+        Cc = 0b0011, // C clear
+        Mi = 0b0100, // N set
+        Pl = 0b0101, // N clear
+        Vs = 0b0110, // V set
+        Vc = 0b0111, // V clear
+        Hi = 0b1000, // C set && Z clear
+        Ls = 0b1001, // C clear || Z set
+        Ge = 0b1010, // N equals V
+        Lt = 0b1011, // N not equal V
+        Gt = 0b1100, // Z clear && (V equals V)
+        Le = 0b1101, // Z set || (N not equal V)
+        Al = 0b1110, // Always - Instruction is always executed
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
+    #[bits = 4]
+    pub enum RegisterName {
+        R0,
+        R1,
+        R2,
+        R3,
+        R4,
+        R5,
+        R6,
+        R7,
+        R8,
+        R9,
+        R10,
+        R11,
+        R12,
+        R13,
+        R14,
+        R15,
+    }
+
+    use RegisterName::*;
+
+    impl From<u8> for RegisterName {
+        fn from(n: u8) -> Self {
+            match n {
+                0 => R0,
+                1 => R1,
+                2 => R2,
+                3 => R3,
+                4 => R4,
+                5 => R5,
+                6 => R6,
+                7 => R7,
+                8 => R8,
+                9 => R9,
+                10 => R10,
+                11 => R11,
+                12 => R12,
+                13 => R13,
+                14 => R14,
+                15 => R15,
+                _ => panic!("Invalid register number {}", n),
+            }
+        }
+    }
+
+    impl Display for RegisterName {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(
+                f,
+                "r{}",
+                match &self {
+                    R0 => "0",
+                    R1 => "1",
+                    R2 => "2",
+                    R3 => "3",
+                    R4 => "4",
+                    R5 => "5",
+                    R6 => "6",
+                    R7 => "7",
+                    R8 => "8",
+                    R9 => "9",
+                    R10 => "10",
+                    R11 => "11",
+                    R12 => "12",
+                    R13 => "13",
+                    R14 => "14",
+                    R15 => "15",
+                }
+            )
+        }
+    }
+
+    pub mod data_processing {
+        use super::*;
+
+        pub fn instr_is_data_processing(instr: u32) -> bool {
+            let data_processing_format = 0b0000_0000_0000_0000_0000_0000_0000_0000;
+
+            let format_mask = 0b0000_1100_0000_0000_0000_0000_0000_0000;
+
+            let extracted_format = instr & format_mask;
+
+            extracted_format == data_processing_format
+        }
+
+        pub fn create_op(instr: u32) -> Op {
+            Op::from_bytes(instr.to_le_bytes())
+        }
+
+        #[derive(BitfieldSpecifier, Clone, Copy, PartialEq, Eq, Debug)]
+        #[bits = 2]
+        pub enum ShiftType {
+            LogicalLeft = 0b00,
+            LogicalRight = 0b01,
+            ArithmeticRight = 0b10,
+            RotateRight = 0b11,
+        }
+
+        #[bitfield(bits = 5)]
+        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+        pub struct ShiftAmount {
+            amount: B5,
+        }
+
+        #[bitfield(bits = 5)]
+        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+
+        pub struct ShiftSource {
+            data: B5,
+        }
+
+        impl ShiftSource {
+            pub fn as_shift_amount(self) -> ShiftAmount {
+                ShiftAmount::from_bytes(self.into_bytes())
+            }
+
+            pub fn as_reg(self) -> RegisterName {
+                RegisterName::from(self.data() as u8)
+            }
+        }
+
+        #[bitfield(bits = 12)]
+        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+        pub struct ShiftRegister {
+            #[skip]
+            ignored: B4,
+            shift_amt_in_reg: bool,
+            #[bits = 2]
+            shift_type: ShiftType,
+            shift_src: B5,
+        }
+
+        #[bitfield(bits = 12)]
+        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+        pub struct RotatedImmediate {
+            value: B8,  // To be zero-extended to 32 bits
+            rotate: B4, // `value` is right-rotated by twice this amount
+        }
+
+        #[bitfield(bits = 12)]
+        #[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
+        pub struct Operand {
+            data: B12,
+        }
+
+        impl Operand {
+            pub fn as_rot_imm(self) -> RotatedImmediate {
+                RotatedImmediate::from_bytes(self.into_bytes())
+            }
+
+            pub fn as_shift_reg(self) -> ShiftRegister {
+                ShiftRegister::from_bytes(self.into_bytes())
+            }
+        }
+
+        #[bitfield(bits = 32)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub struct Op {
+            operand2: Operand,
+            dest_reg: RegisterName,
+            operand1: RegisterName,
+            set_cond: bool,
+            op: OpCode,
+            is_imm_operand: bool,
+            ignored: B2,
+            condition: Condition,
+        }
+
+        #[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
+        #[bits = 4]
+        pub enum OpCode {
+            And, // Logical AND
+            Eor, // Exclusive OR
+            Sub, // Subtract
+            Rsb, // Reverse subtract
+            Add, // Add
+            Adc, // Add with carry
+            Sbc, // Subtract with carry
+            Rsc, // Reverse subtract with carry
+            Tst, // Test bits
+            Teq, // Test bitwise equality
+            Cmp, // Compare
+            Cmn, // Compare negative
+            Orr, // Or
+            Mov, // Move register or constant
+            Bic, // Bit clear
+            Mvn, // Move negative register
+        }
+    }
+}
+////////////////////
 
 #[derive(BitfieldSpecifier, Debug, Clone, Copy, PartialEq, Eq)]
 #[bits = 4]
@@ -199,10 +446,10 @@ impl Display for SetConditionCodes {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
 pub enum ByteOrWord {
-    Byte,
     Word,
+    Byte,
 }
 
 impl Display for ByteOrWord {
@@ -215,6 +462,30 @@ impl Display for ByteOrWord {
                 Self::Word => "",
             }
         )
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
+pub enum UpOrDown {
+    Down, // Subtract from base
+    Up,   // Add offset to base
+}
+
+impl Display for UpOrDown {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
+pub enum PostPreIndexing {
+    Post, // Add offset after transfer
+    Pre,  // Add offset before transfer
+}
+
+impl Display for PostPreIndexing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
     }
 }
 
@@ -317,6 +588,45 @@ impl PartialEq for BlockDataFlags {
 
 impl Eq for BlockDataFlags {}
 
+#[derive(Clone, Copy)]
+#[bitfield(bits = 4)]
+pub struct SingleDataTransferFlags {
+    write_back: B1,
+    transfer_size: ByteOrWord,
+    up_down: UpOrDown,
+    pre_post_indexing: PostPreIndexing,
+}
+
+impl Debug for SingleDataTransferFlags {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}{}{}{}",
+            self.pre_post_indexing(),
+            self.up_down(),
+            self.transfer_size(),
+            self.write_back()
+        )
+    }
+}
+
+impl PartialEq for SingleDataTransferFlags {
+    fn eq(&self, other: &Self) -> bool {
+        self.into_bytes() == other.into_bytes()
+    }
+}
+
+impl Eq for SingleDataTransferFlags {}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SingleDataTransferOp {
+    Str {
+        flags: SingleDataTransferFlags,
+        offset: u16, // 12-bit offset
+    },
+    Ldr {},
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Op {
     Data(DataOp), // All Data Processing ops
@@ -335,7 +645,9 @@ pub enum Op {
     Ldc, // Load coprocessor from memory
     // Load multiple regisers
     BlockData(BlockDataOp),
-    Ldr, // Load register from memory
+    // Ldr and Str
+    SingleDataTransfer(SingleDataTransferOp),
+    // Ldr, // Load register from memory
     Mcr, // Move CPU register to coprocessor register
     Mrc, // Move from coprocessor register to CPU register
     Mrs, // Move PSR status/flags to register
@@ -358,8 +670,6 @@ pub enum Op {
         op2: RegisterName,
     },
     Stc, // Store coprocessor register to memory
-    // Stm, // Store multiple
-    Str, // Store register to memory
     // Software interrupt
     Swi {
         comment_field: Immediate,
@@ -929,7 +1239,7 @@ impl Decoder {
 
     /// Get the condition field of the ARM instruction
     fn get_condition(instr: u32) -> Condition {
-        let cond_bits: u8 = (instr >> (INSTR_SIZE - COND_SIZE)).try_into().unwrap();
+        let cond_bits: u8 = (instr >> (INSTR_BIT_SIZE - COND_SIZE)).try_into().unwrap();
         Condition::from_bytes(cond_bits)
             .unwrap_or_else(|e| panic!("Invalid bit pattern for ARM condition: {e}"))
     }

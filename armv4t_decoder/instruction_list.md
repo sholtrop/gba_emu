@@ -15,7 +15,7 @@
 | **eor**          |    yes           |                |            |
 | **ldc**          |    skipping      |                |  GBA has no coprocessors? |
 | **ldm**          |    yes           |                |            |
-| **ldr**          |                  |                |            |
+| **ldr**          |    testing       |                |            |
 | **mcr**          |                  |                |            |
 | **mla**          |                  |                |            |
 | **mov**          |    yes           |                |            |
