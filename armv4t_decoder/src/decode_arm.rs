@@ -19,17 +19,17 @@ pub mod instr {
         BlockDataTransfer(block_data_transfer::Op),
         BranchAndBranchWithLink(branch_and_link::Op),
         SoftwareInterrupt(software_interrupt::Op),
-        Undefined(u32),
+        Undefined(undefined_instr::Op),
         SingleDataTransfer(u32),
         SingleDataSwap(u32),
         HalfwordDataTransferRegister(u32),
         HalfwordDataTransferImmediate(u32),
         Multiply(multiply::Op),
         MultiplyLong(multiply_long::Op),
-        PsrTransferMrs(u32),
-        PsrTransferMsr(u32),
+        PsrTransferMrs(psr_transfer_mrs::Op),
+        PsrTransferMsr(psr_transfer_msr::Op),
+        PsrTransferMsrImm(psr_transfer_msr::OpImm),
         DataProcessing(data_processing::Op), // ALU instructions
-        Unimplemented(u32),
     }
 
     use Instruction::*;
@@ -70,8 +70,16 @@ pub mod instr {
                 BranchAndBranchWithLink(branch_and_link::parse(instr))
             } else if software_interrupt::is_swi(instr) {
                 SoftwareInterrupt(software_interrupt::parse(instr))
+            } else if undefined_instr::is_undefined(instr) {
+                Undefined(undefined_instr::parse(instr))
             } else if multiply::is_multiply(instr) {
                 Multiply(multiply::parse(instr))
+            } else if psr_transfer_mrs::is_psr_transfer_mrs(instr) {
+                PsrTransferMrs(psr_transfer_mrs::parse(instr))
+            } else if psr_transfer_msr::is_psr_transfer_msr(instr) {
+                PsrTransferMsr(psr_transfer_msr::parse(instr))
+            } else if psr_transfer_msr::is_psr_transfer_msr_imm(instr) {
+                PsrTransferMsrImm(psr_transfer_msr::parse_imm(instr))
             } else if data_processing::is_data_processing(instr) {
                 DataProcessing(data_processing::parse(instr))
             } else {
@@ -131,6 +139,27 @@ pub mod instr {
                     let op2 = format!("{}{}", reg_list, if set_psr { "^" } else { "" });
                     (Some(op1), Some(op2), None, None)
                 }
+                Undefined(_) => (None, None, None, None),
+                PsrTransferMrs(op) => {
+                    let psr = Some(op.src_psr().to_string());
+                    let rd = Some(op.reg_dest().to_string());
+                    (psr, rd, None, None)
+                }
+                PsrTransferMsr(op) => {
+                    let psr = Some(op.dest_psr().to_string());
+                    let rm = Some(op.rm().to_string());
+                    (psr, rm, None, None)
+                }
+                PsrTransferMsrImm(op) => {
+                    let psr = Some(op.dest_psr().to_string());
+                    if op.is_imm_operand() {
+                        let imm = op.src_operand().as_rot_imm().to_string();
+                        (psr, Some(imm), None, None)
+                    } else {
+                        let reg = op.src_operand().as_reg().to_string();
+                        (psr, Some(reg), None, None)
+                    }
+                }
                 _ => todo!("Other instructions' operands' string representations"),
             }
         }
@@ -172,6 +201,10 @@ pub mod instr {
                     }
                     .into(),
                 },
+                PsrTransferMrs(_) => "mrs".into(),
+                PsrTransferMsr(_) | PsrTransferMsrImm(_) => "msr".into(),
+
+                Undefined(_) => "undefined".into(),
                 _ => todo!("other mnemonics"),
             }
         }
@@ -182,17 +215,17 @@ pub mod instr {
                 BlockDataTransfer(op) => op.condition(),
                 BranchAndBranchWithLink(op) => op.condition(),
                 SoftwareInterrupt(op) => op.condition(),
-                // Undefined(op) => op.condition(),
+                Undefined(op) => op.condition(),
                 // SingleDataTransfer(op) => op.condition(),
                 // SingleDataSwap(op) => op.condition(),
                 // HalfwordDataTransferRegister(op) => op.condition(),
                 // HalfwordDataTransferImmediate(op) => op.condition(),
                 Multiply(op) => op.condition(),
                 MultiplyLong(op) => op.condition(),
-                // PsrTransferMrs(op) => op.condition(),
-                // PsrTransferMsr(op) => op.condition(),
+                PsrTransferMrs(op) => op.condition(),
+                PsrTransferMsr(op) => op.condition(),
+                PsrTransferMsrImm(op) => op.condition(),
                 DataProcessing(op) => op.condition(),
-                // Unimplemented(op) => op.condition(),
                 _ => todo!("other ops' conditions"),
             }
         }
@@ -395,6 +428,140 @@ pub mod instr {
         MultiplyAndAccumulate,
     }
 
+    #[bitfield(bits = 12)]
+    #[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
+    pub struct Operand12Bit {
+        data: B12,
+    }
+
+    impl From<RotatedImmediate> for Operand12Bit {
+        fn from(imm: RotatedImmediate) -> Self {
+            Self::from_bytes(imm.into_bytes())
+        }
+    }
+
+    impl From<ShiftRegister> for Operand12Bit {
+        fn from(sr: ShiftRegister) -> Self {
+            Self::from_bytes(sr.into_bytes())
+        }
+    }
+
+    impl From<RegisterName> for Operand12Bit {
+        fn from(rn: RegisterName) -> Self {
+            let bytes = [0, <RegisterName as Specifier>::into_bytes(rn).unwrap()];
+            Self::from_bytes(bytes)
+        }
+    }
+
+    impl Operand12Bit {
+        pub fn as_rot_imm(self) -> RotatedImmediate {
+            RotatedImmediate::from_bytes(self.into_bytes())
+        }
+
+        pub fn as_shift_reg(self) -> ShiftRegister {
+            ShiftRegister::from_bytes(self.into_bytes())
+        }
+
+        pub fn as_reg(self) -> RegisterName {
+            RegisterName::from(self.into_bytes()[1])
+        }
+    }
+
+    #[bitfield(bits = 12)]
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct ShiftRegister {
+        reg: RegisterName,
+        shift_amt_in_reg: bool,
+        #[bits = 2]
+        shift_type: ShiftType,
+        shift_src: B5,
+    }
+
+    impl Display for ShiftRegister {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            // TODO: also display the shift?
+            write!(f, "{}", self.reg())
+        }
+    }
+
+    #[derive(BitfieldSpecifier, Clone, Copy, PartialEq, Eq, Debug)]
+    #[bits = 2]
+    pub enum ShiftType {
+        LogicalLeft = 0b00,
+        LogicalRight = 0b01,
+        ArithmeticRight = 0b10,
+        RotateRight = 0b11,
+    }
+
+    #[bitfield(bits = 5)]
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct ShiftAmount {
+        amount: B5,
+    }
+
+    #[bitfield(bits = 5)]
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+
+    pub struct ShiftSource {
+        data: B5,
+    }
+
+    impl ShiftSource {
+        pub fn as_shift_amount(self) -> ShiftAmount {
+            ShiftAmount::from_bytes(self.into_bytes())
+        }
+
+        pub fn as_reg(self) -> RegisterName {
+            RegisterName::from(self.data() as u8)
+        }
+    }
+
+    #[bitfield(bits = 12)]
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct RotatedImmediate {
+        val: B8,      // To be zero-extended to 32 bits
+        rotation: B4, // `value` is right-rotated by twice this amount
+    }
+
+    impl RotatedImmediate {
+        pub fn value(&self) -> u32 {
+            let value = self.val() as u32;
+            value.rotate_right(self.rotation() as u32 * 2)
+        }
+
+        pub const fn new_imm(value: u8, rotate: u8) -> Self {
+            Self {
+                bytes: [value, rotate],
+            }
+        }
+    }
+
+    impl Display for RotatedImmediate {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.value())
+        }
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
+    #[bits = 1]
+    pub enum PsrLocation {
+        Cpsr,
+        Spsr,
+    }
+
+    impl Display for PsrLocation {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(
+                f,
+                "{}",
+                match self {
+                    Self::Cpsr => "CPSR",
+                    Self::Spsr => "SPSR",
+                }
+            )
+        }
+    }
+
     pub mod data_processing {
         use super::*;
 
@@ -412,113 +579,10 @@ pub mod instr {
             Op::from_bytes(instr.to_le_bytes())
         }
 
-        #[derive(BitfieldSpecifier, Clone, Copy, PartialEq, Eq, Debug)]
-        #[bits = 2]
-        pub enum ShiftType {
-            LogicalLeft = 0b00,
-            LogicalRight = 0b01,
-            ArithmeticRight = 0b10,
-            RotateRight = 0b11,
-        }
-
-        #[bitfield(bits = 5)]
-        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-        pub struct ShiftAmount {
-            amount: B5,
-        }
-
-        #[bitfield(bits = 5)]
-        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-
-        pub struct ShiftSource {
-            data: B5,
-        }
-
-        impl ShiftSource {
-            pub fn as_shift_amount(self) -> ShiftAmount {
-                ShiftAmount::from_bytes(self.into_bytes())
-            }
-
-            pub fn as_reg(self) -> RegisterName {
-                RegisterName::from(self.data() as u8)
-            }
-        }
-
-        #[bitfield(bits = 12)]
-        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-        pub struct ShiftRegister {
-            reg: RegisterName,
-            shift_amt_in_reg: bool,
-            #[bits = 2]
-            shift_type: ShiftType,
-            shift_src: B5,
-        }
-
-        impl Display for ShiftRegister {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                // TODO: also display the shift?
-                write!(f, "{}", self.reg())
-            }
-        }
-
-        #[bitfield(bits = 12)]
-        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-        pub struct RotatedImmediate {
-            val: B8,      // To be zero-extended to 32 bits
-            rotation: B4, // `value` is right-rotated by twice this amount
-        }
-
-        impl RotatedImmediate {
-            pub fn value(&self) -> u32 {
-                let value = self.val() as u32;
-                value.rotate_right(self.rotation() as u32 * 2)
-            }
-
-            pub const fn new_imm(value: u8, rotate: u8) -> Self {
-                Self {
-                    bytes: [value, rotate],
-                }
-            }
-        }
-
-        impl Display for RotatedImmediate {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "{}", self.value())
-            }
-        }
-
-        #[bitfield(bits = 12)]
-        #[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
-        pub struct Operand {
-            data: B12,
-        }
-
-        impl From<RotatedImmediate> for Operand {
-            fn from(imm: RotatedImmediate) -> Self {
-                Self::from_bytes(imm.into_bytes())
-            }
-        }
-
-        impl From<ShiftRegister> for Operand {
-            fn from(sr: ShiftRegister) -> Self {
-                Self::from_bytes(sr.into_bytes())
-            }
-        }
-
-        impl Operand {
-            pub fn as_rot_imm(self) -> RotatedImmediate {
-                RotatedImmediate::from_bytes(self.into_bytes())
-            }
-
-            pub fn as_shift_reg(self) -> ShiftRegister {
-                ShiftRegister::from_bytes(self.into_bytes())
-            }
-        }
-
         #[bitfield(bits = 32)]
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         pub struct Op {
-            pub operand2: Operand,
+            pub operand2: Operand12Bit,
             pub dest_reg: RegisterName,
             pub operand1: RegisterName,
             pub set_cond: bool,
@@ -822,6 +886,112 @@ pub mod instr {
                 let regs = self.regs();
                 RegisterList(regs)
             }
+        }
+    }
+
+    pub mod undefined_instr {
+        use super::*;
+
+        pub fn is_undefined(instr: u32) -> bool {
+            let undefined_format = 0b0000_0110_0000_0000_0000_0000_0001_0000;
+            let format_mask = 0b0000_1110_0000_0000_0000_0000_0001_0000;
+            let extracted_format = instr & format_mask;
+            extracted_format == undefined_format
+        }
+
+        pub fn parse(instr: u32) -> Op {
+            Op::from_bytes(instr.to_le_bytes())
+        }
+
+        #[bitfield(bits = 32)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub struct Op {
+            #[skip]
+            ignored: B28,
+            pub condition: Condition,
+        }
+    }
+
+    pub mod psr_transfer_mrs {
+        use super::*;
+
+        pub fn is_psr_transfer_mrs(instr: u32) -> bool {
+            let mrs_format = 0b0000_0001_0000_1111_0000_0000_0000_0000;
+            let format_mask = 0b0000_1111_1011_1111_0000_0000_0000_0000;
+            let extracted_format = instr & format_mask;
+            extracted_format == mrs_format
+        }
+
+        pub fn parse(instr: u32) -> Op {
+            Op::from_bytes(instr.to_le_bytes())
+        }
+
+        #[bitfield(bits = 32)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub struct Op {
+            #[skip]
+            ignored: B12,
+            pub reg_dest: RegisterName,
+            #[skip]
+            ignored2: B6,
+            pub src_psr: PsrLocation,
+            #[skip]
+            ignored3: B5,
+            pub condition: Condition,
+        }
+    }
+
+    pub mod psr_transfer_msr {
+        use super::*;
+
+        pub fn is_psr_transfer_msr(instr: u32) -> bool {
+            let msr_format = 0b0000_0001_0010_1001_1111_0000_0000_0000;
+            let format_mask = 0b0000_1101_1011_1111_1111_0000_0000_0000;
+            let extracted_format = instr & format_mask;
+            extracted_format == msr_format
+        }
+
+        pub fn is_psr_transfer_msr_imm(instr: u32) -> bool {
+            let msr_flag_format = 0b0000_0001_0010_1000_1111_0000_0000_0000;
+            let format_mask = 0b0000_1101_1011_1111_1111_0000_0000_0000;
+            let extracted_format = instr & format_mask;
+            extracted_format == msr_flag_format
+        }
+
+        pub fn parse(instr: u32) -> Op {
+            Op::from_bytes(instr.to_le_bytes())
+        }
+
+        pub fn parse_imm(instr: u32) -> OpImm {
+            OpImm::from_bytes(instr.to_le_bytes())
+        }
+
+        #[bitfield(bits = 32)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub struct Op {
+            pub rm: RegisterName,
+            #[skip]
+            ignored: B18,
+            pub dest_psr: PsrLocation,
+            #[skip]
+            ignored2: B5,
+            pub condition: Condition,
+        }
+
+        #[bitfield(bits = 32)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub struct OpImm {
+            /// Either [RegisterName] or [RotatedImmediate]
+            pub src_operand: Operand12Bit,
+            #[skip]
+            ignored: B10,
+            pub dest_psr: PsrLocation,
+            #[skip]
+            ignored2: B2,
+            pub is_imm_operand: bool,
+            #[skip]
+            ignored3: B2,
+            pub condition: Condition,
         }
     }
 }
@@ -2242,8 +2412,8 @@ mod tests {
     #[test]
     fn decode_instructions_test() {
         use instr::data_processing::OpCode::*;
-        use instr::data_processing::RotatedImmediate;
         use instr::RegisterName::*;
+        use instr::RotatedImmediate;
         use instr::*;
 
         let add_instr: u32 = 0xe2833001;
