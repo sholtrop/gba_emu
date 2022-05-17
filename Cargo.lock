@@ -44,6 +44,7 @@ version = "0.1.0"
 dependencies = [
  "bitvec",
  "derive_more",
+ "lazy_static",
  "modular-bitfield",
 ]
 
