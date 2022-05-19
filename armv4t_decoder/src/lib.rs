@@ -1,3 +1,3 @@
-pub mod decode_arm;
-pub mod decode_thumb;
+pub mod arm;
+pub mod thumb;
 pub mod register;

@@ -15,27 +15,27 @@
 | **eor**          |    yes           |                |            |
 | **ldc**          |    skipping      |                |  GBA has no coprocessors? |
 | **ldm**          |    yes           |                |            |
-| **ldr**          |    testing       |                |            |
-| **mcr**          |                  |                |            |
-| **mla**          |                  |                |            |
+| **ldr**          |    yes           |                |            |
+| **mcr**          |    skipping      |                |  GBA has no coprocessors?          |
+| **mla**          |    yes           |                |            |
 | **mov**          |    yes           |                |            |
-| **mrc**          |                  |                |            |
+| **mrc**          |    skipping      |                |       GBA has no coprocessors?      |
 | **mrs**          |                  |                |            |
 | **msr**          |                  |                |            |
-| **mul**          |                  |                |            |
-| **mvn**          |                  |                |            |
-| **orr**          |                  |                |            |
-| **rsb**          |                  |                |            |
-| **rsc**          |                  |                |            |
-| **sbc**          |                  |                |            |
-| **stc**          |                  |                |            |
+| **mul**          |    yes              |                |            |
+| **mvn**          |    yes              |                |            |
+| **orr**          |    yes              |                |            |
+| **rsb**          |   yes               |                |            |
+| **rsc**          |   yes               |                |            |
+| **sbc**          |   yes               |                |            |
+| **stc**          |   skipping               |                |      GBA has no coprocessors?        |
 | **stm**          |    yes           |                |            |
-| **str**          |                  |                |            |
+| **str**          |    yes              |                |            |
 | **sub**          |    yes           |                |            |
-| **swi**          |                  |                |            |
+| **swi**          |    yes              |                |            |
 | **swp**          |                  |                |            |
-| **teq**          |                  |                |            |
-| **tst**          |                  |                |            |
+| **teq**          |    yes             |                |            |
+| **tst**          |    yes            |                |            |
    
 ## THUMB (16-bit)
 

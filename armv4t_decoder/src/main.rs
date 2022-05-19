@@ -1,8 +1,8 @@
-use crate::decode_arm::Instruction;
+use crate::arm::Instruction;
 
-mod decode_arm;
-mod decode_thumb;
+mod arm;
 mod register;
+mod thumb;
 
 fn main() {
     println!("{:?}", Instruction::decode(0xFFFF));
