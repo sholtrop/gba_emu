@@ -20,9 +20,11 @@
 | **mla**          |    yes           |                |            |
 | **mov**          |    yes           |                |            |
 | **mrc**          |    skipping      |                |       GBA has no coprocessors?      |
-| **mrs**          |                  |                |            |
-| **msr**          |                  |                |            |
+| **mrs**          |    yes              |                |            |
+| **msr**          |    testing              |                |            |
 | **mul**          |    yes              |                |            |
+| **mull**         |    yes               |               |             |
+| **mlal**         |    yes              |                 |               |           
 | **mvn**          |    yes              |                |            |
 | **orr**          |    yes              |                |            |
 | **rsb**          |   yes               |                |            |
@@ -33,7 +35,7 @@
 | **str**          |    yes              |                |            |
 | **sub**          |    yes           |                |            |
 | **swi**          |    yes              |                |            |
-| **swp**          |                  |                |            |
+| **swp**          |     yes             |                |            |
 | **teq**          |    yes             |                |            |
 | **tst**          |    yes            |                |            |
    

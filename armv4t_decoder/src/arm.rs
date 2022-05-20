@@ -9,9 +9,8 @@ pub enum Instruction {
     SoftwareInterrupt(software_interrupt::Op),
     Undefined(undefined_instr::Op),
     SingleDataTransfer(single_data_transfer::Op),
-    SingleDataSwap(u32),
-    HalfwordDataTransferRegister(u32),
-    HalfwordDataTransferImmediate(u32),
+    SingleDataSwap(single_data_swap::Op),
+    HalfwordDataTransfer(halfword_data_transfer::Op),
     Multiply(multiply::Op),
     MultiplyLong(multiply_long::Op),
     PsrTransferMrs(psr_transfer_mrs::Op),
@@ -63,13 +62,13 @@ impl Instruction {
         } else if single_data_transfer::is_single_data_transfer(instr) {
             SingleDataTransfer(single_data_transfer::parse(instr))
         } else if single_data_swap::is_single_data_swap(instr) {
-            todo!("SingleDataSwap")
-        } else if halfword_data_reg::is_halfword_data_transfer_reg(instr) {
-            todo!("HalfwordDataTransferRegister")
-        } else if halfword_data_imm::is_halfword_data_transfer_imm(instr) {
-            todo!("HalfwordDataTransferImmediate")
+            SingleDataSwap(single_data_swap::parse(instr))
         } else if multiply::is_multiply(instr) {
             Multiply(multiply::parse(instr))
+        } else if multiply_long::is_multiply_long(instr) {
+            MultiplyLong(multiply_long::parse(instr))
+        } else if halfword_data_transfer::is_halfword_data_transfer(instr) {
+            HalfwordDataTransfer(halfword_data_transfer::parse(instr))
         } else if psr_transfer_mrs::is_psr_transfer_mrs(instr) {
             PsrTransferMrs(psr_transfer_mrs::parse(instr))
         } else if psr_transfer_msr::is_psr_transfer_msr(instr) {
@@ -79,7 +78,7 @@ impl Instruction {
         } else if data_processing::is_data_processing(instr) {
             DataProcessing(data_processing::parse(instr))
         } else {
-            todo!("other instructions")
+            panic!("Unknown instruction format: {:x}", instr);
         }
     }
 
@@ -139,21 +138,21 @@ impl Instruction {
             PsrTransferMrs(op) => {
                 let psr = Some(op.src_psr().to_string());
                 let rd = Some(op.reg_dest().to_string());
-                (psr, rd, None, None)
+                (rd, None, psr, None)
             }
             PsrTransferMsr(op) => {
                 let psr = Some(op.dest_psr().to_string());
                 let rm = Some(op.rm().to_string());
-                (psr, rm, None, None)
+                (psr, None, rm, None)
             }
             PsrTransferMsrImm(op) => {
                 let psr = Some(op.dest_psr().to_string());
                 if op.is_imm_operand() {
                     let imm = op.src_operand().as_rot_imm().to_string();
-                    (psr, Some(imm), None, None)
+                    (psr, None, Some(imm), None)
                 } else {
                     let reg = op.src_operand().as_reg().to_string();
-                    (psr, Some(reg), None, None)
+                    (psr, None, Some(reg), None)
                 }
             }
             SingleDataTransfer(op) => {
@@ -166,11 +165,6 @@ impl Instruction {
                 let imm = op.offset().as_imm();
                 let shift_reg = op.offset().as_shift_reg();
                 let no_shift = !shift_reg.shift_amt_in_reg() && shift_reg.shift_amt() == 0;
-                // let shift = if ps_reg.shift() > 0 {
-                //     format!(",{}", ps_reg.shift())
-                // } else {
-                //     "".into()
-                // };
                 let sign = match (op.up_or_down(), no_shift) {
                     (_, true) => "",
                     (Up, false) => "+",
@@ -197,9 +191,46 @@ impl Instruction {
                 };
                 (rd, None, Some(address), None)
             }
-            SingleDataSwap(_) => todo!(),
-            HalfwordDataTransferRegister(_) => todo!(),
-            HalfwordDataTransferImmediate(_) => todo!(),
+            SingleDataSwap(op) => {
+                let dst = op.dest_reg().to_string();
+                let src = op.src_reg().to_string();
+                let rn = Some(format!("[{}]", op.base_reg()));
+                (Some(dst), Some(src), rn, None)
+            }
+            HalfwordDataTransfer(op) => {
+                let dst = Some(op.reg_dest().to_string());
+                let base_reg = op.base_reg();
+                let wb = if op.write_back() { "!" } else { "" };
+                let up_down = match op.up_or_down() {
+                    UpOrDown::Up => "",
+                    UpOrDown::Down => "-",
+                };
+                let operand2 = match (op.is_imm_offset(), op.pre_post_indexing()) {
+                    (true, PreOrPostIndexing::Pre) => {
+                        let offset = op.imm_offset();
+                        if base_reg == R15 {
+                            format!("#{}", offset)
+                        } else if offset == 0 {
+                            format!("[{}]", base_reg)
+                        } else {
+                            format!("[{}, {}]{}", base_reg, offset, wb)
+                        }
+                    }
+                    (true, PreOrPostIndexing::Post) => {
+                        let offset = op.imm_offset();
+                        format!("[{}],{}", base_reg, offset)
+                    }
+                    (false, PreOrPostIndexing::Pre) => {
+                        let offset_reg = op.reg_offset();
+                        format!("[{}, {}{}]{}", base_reg, up_down, offset_reg, wb)
+                    }
+                    (false, PreOrPostIndexing::Post) => {
+                        let offset_reg = op.reg_offset();
+                        format!("[{}],{}{}", base_reg, up_down, offset_reg)
+                    }
+                };
+                (dst, None, Some(operand2), None)
+            }
             Multiply(op) => {
                 use AccumulateType::*;
                 let rd = Some(op.reg_dest().to_string());
@@ -222,11 +253,13 @@ impl Instruction {
     }
 
     pub fn op_mnemonic(&self) -> String {
+        use halfword_data_transfer::ShType::*;
         use multiply_long::Signedness::*;
         use AccumulateType::*;
         use LoadOrStore::*;
         use PreOrPostIndexing::*;
         use UpOrDown::*;
+
         match self {
             BranchAndExchange(_) => "bx".into(),
             BranchAndBranchWithLink(op) => match op.link() {
@@ -268,9 +301,15 @@ impl Instruction {
                 Store => "str".into(),
             },
             Undefined(_) => "undefined".into(),
-            SingleDataSwap(_) => todo!(),
-            HalfwordDataTransferImmediate(_) => todo!(),
-            HalfwordDataTransferRegister(_) => todo!(),
+            SingleDataSwap(_) => "swp".into(),
+            // HalfwordDataTransfer(_) => todo!(),
+            HalfwordDataTransfer(op) => match (op.load_store(), op.sh_type()) {
+                (Load, UnsignedHalfwords) => "ldrh".into(),
+                (Load, SignedHalfwords) => "ldrsh".into(),
+                (Load, SignedByte) => "ldrsb".into(),
+                (Store, UnsignedHalfwords) => "strh".into(),
+                _ => unreachable!(),
+            },
         }
     }
 
@@ -288,9 +327,9 @@ impl Instruction {
             PsrTransferMsr(op) => op.condition(),
             PsrTransferMsrImm(op) => op.condition(),
             DataProcessing(op) => op.condition(),
-            SingleDataSwap(_) => todo!(),
-            HalfwordDataTransferRegister(_) => todo!(),
-            HalfwordDataTransferImmediate(_) => todo!(),
+            SingleDataSwap(op) => op.condition(),
+            HalfwordDataTransfer(op) => op.condition(),
+            // HalfwordDataTransferImmediate(_) => todo!(),
         }
     }
 }
@@ -326,7 +365,7 @@ impl Display for Instruction {
                 format!("{}{}", op.byte_or_word(), op.pre_post_indexing())
             }
 
-            // Swp { size, .. } => size.to_string(),
+            SingleDataSwap(op) => op.byte_or_word().to_string(),
             _ => "".into(),
         };
         let op = self.op_mnemonic();
@@ -509,6 +548,25 @@ impl Display for RegisterName {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
+pub enum ByteOrWord {
+    Word,
+    Byte,
+}
+
+impl Display for ByteOrWord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Byte => "b",
+                Self::Word => "",
+            }
+        )
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
 #[bits = 1]
 pub enum AccumulateType {
     MultiplyOnly,
@@ -541,16 +599,10 @@ impl From<ShiftRegister> for Operand12Bit {
 
 impl From<RegisterName> for Operand12Bit {
     fn from(rn: RegisterName) -> Self {
-        let bytes = [0, <RegisterName as Specifier>::into_bytes(rn).unwrap()];
-        Self::from_bytes(bytes)
+        dbg!(RegisterName::into_bytes(rn).unwrap());
+        Self::from_bytes([RegisterName::into_bytes(rn).unwrap(), 0])
     }
 }
-
-// impl From<PureShiftRegister> for Operand12Bit {
-//     fn from(pure_sr: PureShiftRegister) -> Self {
-//         Self::from_bytes(pure_sr.into_bytes())
-//     }
-// }
 
 impl Debug for Operand12Bit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -572,12 +624,8 @@ impl Operand12Bit {
     }
 
     pub fn as_reg(self) -> RegisterName {
-        RegisterName::from(self.into_bytes()[1])
+        RegisterName::from(self.into_bytes()[0])
     }
-
-    // pub fn as_pure_shift_reg(self) -> PureShiftRegister {
-    //     PureShiftRegister::from_bytes(self.into_bytes())
-    // }
 }
 
 #[bitfield(bits = 12)]
@@ -679,25 +727,6 @@ impl ShiftSource {
         RegisterName::from(self.data() as u8)
     }
 }
-
-/// Differs from [ShiftRegister], since the shift is simply applied to the offset.
-// #[bitfield(bits = 12)]
-// #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-// pub struct PureShiftRegister {
-//     pub reg: RegisterName,
-//     pub shift: B8,
-// }
-
-// impl Display for PureShiftRegister {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         let shift = if self.shift() > 0 {
-//             format!(",{}", self.shift())
-//         } else {
-//             "".into()
-//         };
-//         write!(f, "{}{}", self.reg(), shift)
-//     }
-// }
 
 #[bitfield(bits = 12)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -927,7 +956,7 @@ pub mod multiply_long {
     }
 
     #[bitfield(bits = 32)]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[derive(Clone, Copy, Debug, Eq)]
     pub struct Op {
         pub rm: RegisterName,
         #[skip]
@@ -941,6 +970,19 @@ pub mod multiply_long {
         #[skip]
         ignored2: B5,
         pub condition: Condition,
+    }
+
+    impl PartialEq for Op {
+        fn eq(&self, other: &Self) -> bool {
+            self.rm() == other.rm()
+                && self.rs() == other.rs()
+                && self.reg_dest_lo() == other.reg_dest_lo()
+                && self.reg_dest_hi() == other.reg_dest_hi()
+                && self.set_cond() == other.set_cond()
+                && self.condition() == other.condition()
+                && self.accumulate() == other.accumulate()
+                && self.signedness() == other.signedness()
+        }
     }
 }
 
@@ -1193,7 +1235,7 @@ pub mod psr_transfer_mrs {
     }
 
     #[bitfield(bits = 32)]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[derive(Clone, Copy, Debug, Eq)]
     pub struct Op {
         #[skip]
         ignored: B12,
@@ -1204,6 +1246,14 @@ pub mod psr_transfer_mrs {
         #[skip]
         ignored3: B5,
         pub condition: Condition,
+    }
+
+    impl PartialEq for Op {
+        fn eq(&self, other: &Self) -> bool {
+            self.reg_dest() == other.reg_dest()
+                && self.src_psr() == other.src_psr()
+                && self.condition() == other.condition()
+        }
     }
 }
 
@@ -1245,7 +1295,7 @@ pub mod psr_transfer_msr {
     }
 
     #[bitfield(bits = 32)]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[derive(Clone, Copy, Debug, Eq)]
     pub struct OpImm {
         /// `src_operand` is either a [RegisterName] or [RotatedImmediate]
         pub src_operand: Operand12Bit,
@@ -1258,6 +1308,15 @@ pub mod psr_transfer_msr {
         #[skip]
         ignored3: B2,
         pub condition: Condition,
+    }
+
+    impl PartialEq for OpImm {
+        fn eq(&self, other: &Self) -> bool {
+            self.src_operand() == other.src_operand()
+                && self.dest_psr() == other.dest_psr()
+                && self.is_imm_operand() == other.is_imm_operand()
+                && self.condition() == other.condition()
+        }
     }
 }
 
@@ -1273,25 +1332,6 @@ pub mod single_data_transfer {
 
     pub fn parse(instr: u32) -> Op {
         Op::from_bytes(instr.to_le_bytes())
-    }
-
-    #[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
-    pub enum ByteOrWord {
-        Word,
-        Byte,
-    }
-
-    impl Display for ByteOrWord {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(
-                f,
-                "{}",
-                match self {
-                    Self::Byte => "b",
-                    Self::Word => "",
-                }
-            )
-        }
     }
 
     #[bitfield(bits = 32)]
@@ -1329,36 +1369,156 @@ pub mod single_data_transfer {
 }
 
 pub mod single_data_swap {
+    use super::*;
+
     pub fn is_single_data_swap(instr: u32) -> bool {
         let single_data_swap_format = 0b0000_0001_0000_0000_0000_0000_1001_0000;
         let format_mask = 0b0000_1111_1000_0000_0000_1111_1111_0000;
         let extracted_format = instr & format_mask;
         extracted_format == single_data_swap_format
     }
+
+    pub fn parse(instr: u32) -> Op {
+        Op::from_bytes(instr.to_le_bytes())
+    }
+
+    #[bitfield(bits = 32)]
+    #[derive(Clone, Copy, Debug, Eq)]
+    pub struct Op {
+        /// `offset` is either a [ShiftRegister] or [u16] (12-bit immediate)
+        pub src_reg: RegisterName,
+        #[skip]
+        ignored: B8,
+        pub dest_reg: RegisterName,
+        pub base_reg: RegisterName,
+        #[skip]
+        ignored2: B2,
+        pub byte_or_word: ByteOrWord,
+        #[skip]
+        ignored3: B5,
+        pub condition: Condition,
+    }
+
+    impl PartialEq for Op {
+        fn eq(&self, other: &Self) -> bool {
+            self.src_reg() == other.src_reg()
+                && self.dest_reg() == other.dest_reg()
+                && self.base_reg() == other.base_reg()
+                && self.byte_or_word() == other.byte_or_word()
+                && self.condition() == other.condition()
+        }
+    }
 }
 
-pub mod halfword_data_reg {
-    pub fn is_halfword_data_transfer_reg(instr: u32) -> bool {
+pub mod halfword_data_transfer {
+    use super::*;
+
+    pub fn is_halfword_data_transfer(instr: u32) -> bool {
         let halfword_data_transfer_register_format = 0b0000_0000_0000_0000_0000_0000_1001_0000;
-        let format_mask = 0b0000_1110_0100_0000_0000_1111_1001_0000;
+        let format_mask = 0b0000_1110_0000_0000_0000_1111_1001_0000;
         let extracted_format = instr & format_mask;
         extracted_format == halfword_data_transfer_register_format
     }
-}
 
-pub mod halfword_data_imm {
-    pub fn is_halfword_data_transfer_imm(instr: u32) -> bool {
-        let halfword_data_transfer_immediate_format = 0b0000_0000_0100_0000_0000_0000_1001_0000;
-        let format_mask = 0b0000_1110_0100_0000_0000_0000_1001_0000;
-        let extracted_format = instr & format_mask;
-        extracted_format == halfword_data_transfer_immediate_format
+    pub fn parse(instr: u32) -> Op {
+        Op::from_bytes(instr.to_le_bytes())
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
+    #[bits = 2]
+    pub enum ShType {
+        Swp,
+        UnsignedHalfwords,
+        SignedByte,
+        SignedHalfwords,
+    }
+
+    #[bitfield(bits = 32)]
+    #[derive(Clone, Copy, Debug, Eq)]
+    pub struct Op {
+        /// Is [RegisterName] when `is_imm` is 0, otherwise an immediate formed by OR'ing with `offset_hi`
+        offset_lo_or_reg: B4,
+        #[skip]
+        ignored: B1,
+        pub sh_type: ShType,
+        #[skip]
+        ignored2: B1,
+        offset_hi: B4,
+        pub reg_dest: RegisterName,
+        pub base_reg: RegisterName,
+        pub load_store: LoadOrStore,
+        pub write_back: bool,
+        pub is_imm_offset: bool,
+        pub up_or_down: UpOrDown,
+        pub pre_post_indexing: PreOrPostIndexing,
+        #[skip]
+        ignored4: B3,
+        pub condition: Condition,
+    }
+
+    impl Op {
+        pub fn imm_offset(&self) -> u8 {
+            if !self.is_imm_offset() {
+                panic!("This Op is not an immediate")
+            }
+            (self.offset_hi() << 4) | self.offset_lo_or_reg()
+        }
+
+        pub fn with_imm_offset(self, offset: u8) -> Self {
+            if !self.is_imm_offset() {
+                panic!("This Op is not an immediate")
+            }
+            let first = self.with_offset_hi(offset >> 4);
+            first.with_offset_lo_or_reg(offset & 0b1111)
+        }
+
+        pub fn reg_offset(&self) -> RegisterName {
+            if self.is_imm_offset() {
+                panic!("This Op does not have a register offset")
+            }
+            self.offset_lo_or_reg().into()
+        }
+
+        pub fn with_reg_offset(self, reg: RegisterName) -> Self {
+            if self.is_imm_offset() {
+                panic!("This Op does not have a register offset")
+            }
+            self.with_offset_lo_or_reg(reg.into())
+        }
+    }
+
+    impl PartialEq for Op {
+        fn eq(&self, other: &Self) -> bool {
+            self.offset_lo_or_reg() == other.offset_lo_or_reg()
+                && self.offset_hi() == other.offset_hi()
+                && self.sh_type() == other.sh_type()
+                && self.reg_dest() == other.reg_dest()
+                && self.base_reg() == other.base_reg()
+                && self.load_store() == other.load_store()
+                && self.write_back() == other.write_back()
+                && self.up_or_down() == other.up_or_down()
+                && self.pre_post_indexing() == other.pre_post_indexing()
+                && self.condition() == other.condition()
+                && self.is_imm_offset() == other.is_imm_offset()
+        }
     }
 }
 
+// pub mod halfword_data_imm {
+//     pub fn is_halfword_data_transfer_imm(instr: u32) -> bool {
+//         let halfword_data_transfer_immediate_format = 0b0000_0000_0100_0000_0000_0000_1001_0000;
+//         let format_mask = 0b0000_1110_0100_0000_0000_0000_1001_0000;
+//         let extracted_format = instr & format_mask;
+//         extracted_format == halfword_data_transfer_immediate_format
+//     }
+// }
+
 #[cfg(test)]
 mod tests {
-    use super::single_data_transfer::ByteOrWord;
+    use super::halfword_data_transfer::ShType::*;
+    use super::multiply_long::Signedness::*;
     use super::AccumulateType::*;
+    use super::ByteOrWord;
     use super::Condition::*;
     use super::LoadOrStore::*;
     use super::OpCode::*;
@@ -1369,7 +1529,7 @@ mod tests {
 
     lazy_static! {
     // Instruction hex, assembly string, expected decoded instruction
-    static ref TEST_INSTRUCTIONS: [(u32, &'static str, Instruction); 28] = [
+    static ref TEST_INSTRUCTIONS: [(u32, &'static str, Instruction); 35] = [
         (
             0xe2833001,
             "add r3, r3, #1",
@@ -1718,6 +1878,96 @@ mod tests {
                     .with_shift_type(LogicalLeft)
                     .into()
                 )
+            )
+        ),
+        (
+            0xe1442093,
+            "swpb r2, r3, [r4]",
+            Instruction::SingleDataSwap(single_data_swap::Op::new()
+                .with_condition(Al)
+                .with_byte_or_word(ByteOrWord::Byte)
+                .with_dest_reg(R2)
+                .with_src_reg(R3)
+                .with_base_reg(R4)
+            )
+        ),
+        (
+            0xe0841392,
+            "umull r1, r4, r2, r3",
+            Instruction::MultiplyLong(multiply_long::Op::new()
+                .with_condition(Al)
+                .with_accumulate(MultiplyOnly)
+                .with_reg_dest_lo(R1)
+                .with_reg_dest_hi(R4)
+                .with_rm(R2)
+                .with_rs(R3)
+                .with_signedness(Unsigned)
+                .with_set_cond(false)
+            )
+        ),
+        (
+            0xe0f51392,
+            "smlals r1, r5, r2, r3",
+            Instruction::MultiplyLong(multiply_long::Op::new()
+                .with_condition(Al)
+                .with_accumulate(MultiplyAndAccumulate)
+                .with_reg_dest_lo(R1)
+                .with_reg_dest_hi(R5)
+                .with_rm(R2)
+                .with_rs(R3)
+                .with_signedness(Signed)
+                .with_set_cond(true)
+            )
+        ),
+        (
+            0xe1d210b0,
+            "ldrh r1, [r2]",
+            Instruction::HalfwordDataTransfer(halfword_data_transfer::Op::new()
+                .with_condition(Al)
+                .with_load_store(Load)
+                .with_up_or_down(Up)
+                .with_write_back(false)
+                .with_pre_post_indexing(PreOrPostIndexing::Pre)
+                .with_sh_type(UnsignedHalfwords)
+                .with_reg_dest(R1)
+                .with_base_reg(R2)
+                .with_is_imm_offset(true)
+                .with_imm_offset(0)
+            )
+        ),
+        (
+            0xe10230b4,
+            "strh r3, [r2, -r4]",
+            Instruction::HalfwordDataTransfer(halfword_data_transfer::Op::new()
+                .with_condition(Al)
+                .with_load_store(Store)
+                .with_up_or_down(Down)
+                .with_write_back(false)
+                .with_pre_post_indexing(PreOrPostIndexing::Pre)
+                .with_sh_type(UnsignedHalfwords)
+                .with_reg_dest(R3)
+                .with_base_reg(R2)
+                .with_is_imm_offset(false)
+                .with_reg_offset(R4)
+            )
+        ),
+        (
+            0x814f1000,
+            "mrshi r1, SPSR",
+            Instruction::PsrTransferMrs(psr_transfer_mrs::Op::new()
+                .with_condition(Hi)
+                .with_reg_dest(R1)
+                .with_src_psr(PsrLocation::Spsr)
+            )
+        ),
+        (
+            0xe128f001,
+            "msr CPSR, r1",
+            Instruction::PsrTransferMsrImm(psr_transfer_msr::OpImm::new()
+                .with_condition(Al)
+                .with_dest_psr(PsrLocation::Cpsr)
+                .with_is_imm_operand(false)
+                .with_src_operand(R1.into())
             )
         )
     ];
