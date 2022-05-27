@@ -1,5 +1,5 @@
 /*
-  case IsTHUMBSoftwareInterrupt(opcode):
+  x case IsTHUMBSoftwareInterrupt(opcode):
     return THUMBSoftwareInterrupt
 
   case IsUnconditionalBranch(opcode):
@@ -53,11 +53,14 @@
   case IsAddSubtract(opcode):
     return AddSubtract
 
-  case IsMoveShiftedRegister(opcode):
+  x case IsMoveShiftedRegister(opcode):
     return MoveShiftedRegister
 } */
 use modular_bitfield::{bitfield, specifiers::*, BitfieldSpecifier, Specifier};
 use std::fmt::{Debug, Display};
+
+use crate::common::RegisterName;
+use modular_bitfield::specifiers::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operands {
@@ -67,9 +70,29 @@ pub enum Operands {
     Four(String, String, String, String),
 }
 
+#[bitfield(bits = 5)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, BitfieldSpecifier)]
+
+pub struct Operand5Bit {
+    value: B5,
+}
+
+impl From<u8> for Operand5Bit {
+    fn from(value: u8) -> Self {
+        Operand5Bit::new().with_value(value)
+    }
+}
+
+impl Display for Operand5Bit {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "#{}", self.value())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThumbInstruction {
     SoftwareInterrupt(software_interrupt::Op),
+    MoveShiftedRegister(move_shifted_reg::Op),
 }
 
 use ThumbInstruction::*;
@@ -77,7 +100,9 @@ use ThumbInstruction::*;
 impl ThumbInstruction {
     pub fn decode(instr: u16) -> Self {
         if software_interrupt::is_thumb_swi(instr) {
-            Self::SoftwareInterrupt(software_interrupt::parse(instr))
+            SoftwareInterrupt(software_interrupt::parse(instr))
+        } else if move_shifted_reg::is_move_shifted_reg(instr) {
+            MoveShiftedRegister(move_shifted_reg::parse(instr))
         } else {
             todo!("Unimplemented THUMB instruction {instr}")
         }
@@ -88,12 +113,24 @@ impl ThumbInstruction {
 
         match self {
             SoftwareInterrupt(op) => One(op.comment().to_string()),
+            MoveShiftedRegister(op) => Three(
+                op.reg_dest().to_string(),
+                op.reg_src().to_string(),
+                op.offset().to_string(),
+            ),
         }
     }
 
     fn get_mnemonic(&self) -> String {
+        use move_shifted_reg::ShiftOp::*;
+
         match self {
             SoftwareInterrupt(_) => "swi".into(),
+            MoveShiftedRegister(op) => match op.op() {
+                Lsl => "lsl".into(),
+                Lsr => "lsr".into(),
+                Asr => "asr".into(),
+            },
         }
     }
 }
@@ -106,226 +143,44 @@ impl Display for ThumbInstruction {
 
         match operands {
             One(op1) => write!(f, "{} {}", op, op1),
-
+            Three(dst, op1, op2) => write!(f, "{} {}, {}, {}", op, dst, op1, op2),
             _ => todo!("More operands stringified"),
         }
     }
 }
 
-// pub pub mod software_interrupt {
-//     use super::*;
-//     pub fn is_thumb_swi(op: u16) -> bool {
-//         let swi_format = 0b1101_1111_0000_0000;
-//         let format_mask = 0b1111_1111_0000_0000;
-//         let extracted_format = op & format_mask;
-//         extracted_format == swi_format
-//     }
-
-// #[bitfield(bits = 16)]
-// #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-// pub struct Op {
-//     pub comment: B8,
-//     #[skip]
-//     ignored: B8,
-// }
-
-//     pub fn parse(op: u16) -> Op {
-//         Op::from_bytes(op.to_le_bytes())
-//     }
-// }
-
-/*
-
-func IsTHUMBSoftwareInterrupt(opcode uint16) bool {
-  let  softwareInterruptFormat = 0b1101_1111_0000_0000
-
-  let  format_mask = 0b1111_1111_0000_0000
-
-  let  extracted_format = opcode & format_mask
-
-  return extracted_format == softwareInterruptFormat
+#[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
+#[bits = 3]
+pub enum RegisterName3Bit {
+    R0,
+    R1,
+    R2,
+    R3,
+    R4,
+    R5,
+    R6,
+    R7,
 }
 
-func IsUnconditionalBranch(opcode uint16) bool {
-  let  unconditionalBranchFormat = 0b1110_0000_0000_0000
-
-  let  format_mask = 0b1111_1000_0000_0000
-
-  let  extracted_format = opcode & format_mask
-
-  return extracted_format == unconditionalBranchFormat
+impl Display for RegisterName3Bit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use RegisterName3Bit::*;
+        write!(
+            f,
+            "r{}",
+            match self {
+                R0 => 0,
+                R1 => 1,
+                R2 => 2,
+                R3 => 3,
+                R4 => 4,
+                R5 => 5,
+                R6 => 6,
+                R7 => 7,
+            }
+        )
+    }
 }
-
-func IsConditionalBranch(opcode uint16) bool {
-  let  conditionalBranchFormat = 0b1101_0000_0000_0000
-
-  let  format_mask = 0b1111_0000_0000_0000
-
-  let  extracted_format = opcode & format_mask
-
-  return extracted_format == conditionalBranchFormat
-}
-
-func IsMultipleLoadstore(opcode uint16) bool {
-  let  multipleLoadStoreFormat = 0b1100_0000_0000_0000
-
-  let  format_mask = 0b1111_0000_0000_0000
-
-  let  extracted_format = opcode & format_mask
-
-  return extracted_format == multipleLoadStoreFormat
-}
-
-func IsLongBranchWithLink(opcode uint16) bool {
-  let  longBranchWithLinkFormat = 0b1111_0000_0000_0000
-
-  let  format_mask = 0b1111_0000_0000_0000
-
-  let  extracted_format = opcode & format_mask
-
-  return extracted_format == longBranchWithLinkFormat
-}
-
-func IsAddOffsetToStackPointer(opcode uint16) bool {
-  let  addOffsetToStackPointerFormat = 0b1011_0000_0000_0000
-
-  let  format_mask = 0b1111_1111_0000_0000
-
-  let  extracted_format = opcode & format_mask
-
-  return extracted_format == addOffsetToStackPointerFormat
-}
-
-func IsPushPopRegisters(opcode uint16) bool {
-  let  pushopRegistersFormat = 0b1011_0100_0000_0000
-
-  let  format_mask = 0b1111_0110_0000_0000
-
-  let  extracted_format = opcode & format_mask
-
-  return extracted_format == pushopRegistersFormat
-}
-
-func IsLoadStoreHalfword(opcode uint16) bool {
-  let  loadStoreHalfwordFormat = 0b1000_0000_0000_0000
-
-  let  format_mask = 0b1111_0000_0000_0000
-
-  let  extracted_format = opcode & format_mask
-
-  return extracted_format == loadStoreHalfwordFormat
-}
-
-func IsSPRelativeLoadStore(opcode uint16) bool {
-  let  spRelativeLoadStoreFormat = 0b1001_0000_0000_0000
-
-  let  format_mask = 0b1111_0000_0000_0000
-
-  let  extracted_format = opcode & format_mask
-
-  return extracted_format == spRelativeLoadStoreFormat
-}
-
-func IsLoadAddress(opcode uint16) bool {
-  let  loadAddressFormat = 0b1010_0000_0000_0000
-
-  let  format_mask = 0b1111_0000_0000_0000
-
-  let  extracted_format = opcode & format_mask
-
-  return extracted_format == loadAddressFormat
-}
-
-func IsLoadStoreWithImmediateOffset(opcode uint16) bool {
-  let  loadStoreImmediateOffsetFormat = 0b0110_0000_0000_0000
-
-  let  format_mask = 0b1110_0000_0000_0000
-
-  let  extracted_format = opcode & format_mask
-
-  return extracted_format == loadStoreImmediateOffsetFormat
-}
-
-func IsLoadStoreWithRegisterOffset(opcode uint16) bool {
-  let  loadStoreRegisterOffsetFormat = 0b0101_0000_0000_0000
-
-  let  format_mask = 0b1111_0010_0000_0000
-
-  let  extracted_format = opcode & format_mask
-
-  return extracted_format == loadStoreRegisterOffsetFormat
-}
-
-func IsLoadStoreSignExtendedByteHalfword(opcode uint16) bool {
-  let  loadStoreSignExtendedByteHalfwordFormat = 0b0101_0010_0000_0000
-
-  let  format_mask = 0b1111_0010_0000_0000
-
-  let  extracted_format = opcode & format_mask
-
-  return extracted_format == loadStoreSignExtendedByteHalfwordFormat
-}
-
-func IsPCRelativeLoad(opcode uint16) bool {
-  let  pcRelativeLoadFormat = 0b0100_1000_0000_0000
-
-  let  format_mask = 0b1111_1000_0000_0000
-
-  let  extracted_format = opcode & format_mask
-
-  return extracted_format == pcRelativeLoadFormat
-}
-
-func IsHiRegisterOperationsBranchExchange(opcode uint16) bool {
-  let  hiRegisterOperationsBranchExchangeFormat = 0b0100_0100_0000_0000
-
-  let  format_mask = 0b1111_1100_0000_0000
-
-  let  extracted_format = opcode & format_mask
-
-  return extracted_format == hiRegisterOperationsBranchExchangeFormat
-}
-
-func IsALUOperations(opcode uint16) bool {
-  let  aluOperationsFormat = 0b0100_0000_0000_0000
-
-  let  format_mask = 0b1111_1100_0000_0000
-
-  let  extracted_format = opcode & format_mask
-
-  return extracted_format == aluOperationsFormat
-}
-
-func IsMoveCompareAddSubtractImmediate(opcode uint16) bool {
-  let  moveCompareAddSubtractImmediateFormat = 0b0010_0000_0000_0000
-
-  let  format_mask = 0b1110_0000_0000_0000
-
-  let  extracted_format = opcode & format_mask
-
-  return extracted_format == moveCompareAddSubtractImmediateFormat
-}
-
-func IsAddSubtract(opcode uint16) bool {
-  let  addSubtractFormat = 0b0001_1000_0000_0000
-
-  let  format_mask = 0b1111_1000_0000_0000
-
-  let  extracted_format = opcode & format_mask
-
-  return extracted_format == addSubtractFormat
-}
-
-func IsMoveShiftedRegister(opcode uint16) bool {
-  let  moveShiftedRegistersFormat = 0b0000_0000_0000_0000
-
-  let  format_mask = 0b1110_0000_0000_0000
-
-  let  extracted_format = opcode & format_mask
-
-  return extracted_format == moveShiftedRegistersFormat
-}
-*/
 
 pub mod software_interrupt {
     use super::*;
@@ -336,6 +191,7 @@ pub mod software_interrupt {
         let extracted_format = opcode & format_mask;
         extracted_format == software_interrupt_format
     }
+
     #[bitfield(bits = 16)]
     #[derive(Clone, Copy, Debug, Eq)]
     pub struct Op {
@@ -509,78 +365,46 @@ pub mod add_sub {
 }
 
 pub mod move_shifted_reg {
+    use super::*;
+
     pub fn is_move_shifted_reg(opcode: u16) -> bool {
-        let move_shifted_reg_format: u16 = 0b1101_0000_0000_0000;
-        let format_mask: u16 = 0b1111_0000_0000_0000;
+        let move_shifted_reg_format: u16 = 0b0000_0000_0000_0000;
+        let format_mask: u16 = 0b1110_0000_0000_0000;
         let extracted_format = opcode & format_mask;
         extracted_format == move_shifted_reg_format
     }
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
+    #[bits = 2]
+    pub enum ShiftOp {
+        Lsl,
+        Lsr,
+        Asr,
+    }
+
+    #[bitfield(bits = 16)]
+    #[derive(Clone, Copy, Debug, Eq)]
+    pub struct Op {
+        pub reg_dest: RegisterName3Bit,
+        pub reg_src: RegisterName3Bit,
+        pub offset: Operand5Bit,
+        pub op: ShiftOp,
+        #[skip]
+        ignored: B3,
+    }
+    impl PartialEq for Op {
+        fn eq(&self, other: &Self) -> bool {
+            self.reg_dest() == other.reg_dest()
+                && self.reg_src() == other.reg_src()
+                && self.offset() == other.offset()
+                && self.op() == other.op()
+        }
+    }
+
+    pub fn parse(instr: u16) -> Op {
+        Op::from_bytes(instr.to_le_bytes())
+    }
 }
-
-/*
-func DecodeTHUMBInstruction(opcode uint16) Instruction {
-  switch {
-    case IsTHUMBSoftwareInterrupt(opcode):
-      return THUMBSoftwareInterrupt
-
-    case IsUnconditionalBranch(opcode):
-      return UnconditionalBranch
-
-    case IsConditionalBranch(opcode):
-      return ConditionalBranch
-
-    case IsMultipleLoadstore(opcode):
-      return MultipleLoadstore
-
-    case IsLongBranchWithLink(opcode):
-      return LongBranchWithLink
-
-    case IsAddOffsetToStackPointer(opcode):
-      return AddOffsetToStackPointer
-
-    case IsPushPopRegisters(opcode):
-      return PushPopRegisters
-
-    case IsLoadStoreHalfword(opcode):
-      return LoadStoreHalfword
-
-    case IsSPRelativeLoadStore(opcode):
-      return SPRelatvieLoadStore
-
-    case IsLoadAddress(opcode):
-      return LoadAddress
-
-    case IsLoadStoreWithImmediateOffset(opcode):
-      return LoadStoreWithImmediateOffset
-
-    case IsLoadStoreWithRegisterOffset(opcode):
-      return LoadStoreWithRegisterOffset
-
-    case IsLoadStoreSignExtendedByteHalfword(opcode):
-      return LoadStoreSignExtendedByteHalfword
-
-    case IsPCRelativeLoad(opcode):
-      return PCRelativeLoad
-
-    case IsHiRegisterOperationsBranchExchange(opcode):
-      return HiRegisterOperationsBranchExchange
-
-    case IsALUOperations(opcode):
-      return ALUOperations
-
-    case IsMoveCompareAddSubtractImmediate(opcode):
-      return MoveCompareAddSubtractImmediate
-
-    case IsAddSubtract(opcode):
-      return AddSubtract
-
-    case IsMoveShiftedRegister(opcode):
-      return MoveShiftedRegister
-  }
-
-  return UnimplementedTHUMBInstruction
-}
-*/
 
 #[cfg(test)]
 mod tests {
@@ -589,13 +413,22 @@ mod tests {
 
     lazy_static! {
     // Instruction hex, assembly string, expected decoded instruction
-        static ref TEST_INSTRUCTIONS: [(u16, &'static str, ThumbInstruction); 1] = [(
+        static ref TEST_INSTRUCTIONS: [(u16, &'static str, ThumbInstruction); 2] = [
+          (
             0xdf08,
             "swi 8",
             ThumbInstruction::SoftwareInterrupt(software_interrupt::Op::new()
-                .with_comment(8)),
-        ),
-
+              .with_comment(8)),
+          ),
+          (
+            0x0091,
+            "lsl r1, r2, #2",
+            ThumbInstruction::MoveShiftedRegister(move_shifted_reg::Op::new()
+              .with_reg_dest(RegisterName3Bit::R1)
+              .with_reg_src(RegisterName3Bit::R2)
+              .with_offset(2.into())
+              .with_op(move_shifted_reg::ShiftOp::Lsl)),
+          )
         ];
     }
 

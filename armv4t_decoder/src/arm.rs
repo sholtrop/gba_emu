@@ -1,5 +1,7 @@
+use crate::common::RegisterName;
 use modular_bitfield::{bitfield, specifiers::*, BitfieldSpecifier, Specifier};
 use std::fmt::{Debug, Display};
+use RegisterName::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Instruction {
@@ -447,29 +449,6 @@ impl Display for Condition {
         )
     }
 }
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
-#[bits = 4]
-pub enum RegisterName {
-    R0,
-    R1,
-    R2,
-    R3,
-    R4,
-    R5,
-    R6,
-    R7,
-    R8,
-    R9,
-    R10,
-    R11,
-    R12,
-    R13,
-    R14,
-    R15,
-}
-
-use RegisterName::*;
 
 use self::data_processing::OpCode;
 

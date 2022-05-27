@@ -3,6 +3,7 @@ use arm7tdmi_decoder::arm::{psr_transfer_msr, Operand12Bit};
 use crate::arm::Instruction;
 
 mod arm;
+mod common;
 mod register;
 mod thumb;
 
