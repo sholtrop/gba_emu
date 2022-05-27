@@ -1529,7 +1529,7 @@ mod tests {
 
     lazy_static! {
     // Instruction hex, assembly string, expected decoded instruction
-    static ref TEST_INSTRUCTIONS: [(u32, &'static str, Instruction); 35] = [
+    static ref TEST_INSTRUCTIONS: [(u32, &'static str, Instruction); 36] = [
         (
             0xe2833001,
             "add r3, r3, #1",
@@ -1968,6 +1968,16 @@ mod tests {
                 .with_dest_psr(PsrLocation::Cpsr)
                 .with_is_imm_operand(false)
                 .with_src_operand(R1.into())
+            )
+        ),
+        (
+            0xe368f201,
+            "msr SPSR, #268435456",
+            Instruction::PsrTransferMsrImm(psr_transfer_msr::OpImm::new()
+                .with_condition(Al)
+                .with_dest_psr(PsrLocation::Spsr)
+                .with_is_imm_operand(true)
+                .with_src_operand(RotatedImmediate::new_imm(1, 2).into())
             )
         )
     ];

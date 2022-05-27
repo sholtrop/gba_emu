@@ -21,7 +21,7 @@
 | **mov**          |    yes           |                |            |
 | **mrc**          |    skipping      |                |       GBA has no coprocessors?      |
 | **mrs**          |    yes              |                |            |
-| **msr**          |    testing              |                |            |
+| **msr**          |    yes            |                |            |
 | **mul**          |    yes              |                |            |
 | **mull**         |    yes               |               |             |
 | **mlal**         |    yes              |                 |               |           
