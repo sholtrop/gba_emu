@@ -62,6 +62,9 @@ use std::fmt::{Debug, Display};
 use crate::common::RegisterName;
 use modular_bitfield::specifiers::*;
 
+pub const THUMB_INSTR_SIZE_BITS: u8 = 16;
+pub const THUMB_INSTR_SIZE_BYTES: u8 = THUMB_INSTR_SIZE_BITS / 8;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operands {
     One(String),
@@ -92,6 +95,7 @@ impl Display for Operand5Bit {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThumbInstruction {
     SoftwareInterrupt(software_interrupt::Op),
+    UnconditionalBranch(unconditional_branch::Op),
     MoveShiftedRegister(move_shifted_reg::Op),
 }
 
@@ -101,6 +105,8 @@ impl ThumbInstruction {
     pub fn decode(instr: u16) -> Self {
         if software_interrupt::is_thumb_swi(instr) {
             SoftwareInterrupt(software_interrupt::parse(instr))
+        } else if unconditional_branch::is_unconditional_branch(instr) {
+            UnconditionalBranch(unconditional_branch::parse(instr))
         } else if move_shifted_reg::is_move_shifted_reg(instr) {
             MoveShiftedRegister(move_shifted_reg::parse(instr))
         } else {
@@ -113,6 +119,7 @@ impl ThumbInstruction {
 
         match self {
             SoftwareInterrupt(op) => One(op.comment().to_string()),
+            UnconditionalBranch(op) => One(op.offset11().to_string()),
             MoveShiftedRegister(op) => Three(
                 op.reg_dest().to_string(),
                 op.reg_src().to_string(),
@@ -126,6 +133,7 @@ impl ThumbInstruction {
 
         match self {
             SoftwareInterrupt(_) => "swi".into(),
+            UnconditionalBranch(_) => "b".into(),
             MoveShiftedRegister(op) => match op.op() {
                 Lsl => "lsl".into(),
                 Lsr => "lsr".into(),
@@ -212,11 +220,56 @@ pub mod software_interrupt {
 }
 
 pub mod unconditional_branch {
+    use bitvec::macros::internal::funty::Fundamental;
+
+    use super::*;
+
     pub fn is_unconditional_branch(opcode: u16) -> bool {
         let unconditional_branch_format: u16 = 0b1110_0000_0000_0000;
         let format_mask: u16 = 0b1111_1000_0000_0000;
         let extracted_format = opcode & format_mask;
         extracted_format == unconditional_branch_format
+    }
+
+    #[bitfield(bits = 11)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, BitfieldSpecifier)]
+    /// Two's complement 12-bit signed PC relative offset that is 2-byte aligned (i.e. bit 0 is 0)
+    pub struct Offset11 {
+        value: B11,
+    }
+
+    impl From<i16> for Offset11 {
+        fn from(value: i16) -> Self {
+            let first_11bits = value & ((1 << 11) - 1);
+            Offset11::new().with_value(first_11bits as u16)
+        }
+    }
+
+    impl Display for Offset11 {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let sign_extended = (0b1111_1000_0000_0000 | self.value()) as i16;
+            // PC is two instructions ahead, so to recontruct add 2 * 2
+            let val = (sign_extended << 1) + (THUMB_INSTR_SIZE_BYTES * 2) as i16;
+            write!(f, "{}", val)
+        }
+    }
+
+    #[bitfield(bits = 16)]
+    #[derive(Clone, Copy, Debug, Eq)]
+    pub struct Op {
+        pub offset11: Offset11,
+        #[skip]
+        ignored: B5,
+    }
+
+    impl PartialEq for Op {
+        fn eq(&self, other: &Self) -> bool {
+            self.offset11() == other.offset11()
+        }
+    }
+
+    pub fn parse(instr: u16) -> Op {
+        Op::from_bytes(instr.to_le_bytes())
     }
 }
 
@@ -413,12 +466,13 @@ mod tests {
 
     lazy_static! {
     // Instruction hex, assembly string, expected decoded instruction
-        static ref TEST_INSTRUCTIONS: [(u16, &'static str, ThumbInstruction); 2] = [
+        static ref TEST_INSTRUCTIONS: [(u16, &'static str, ThumbInstruction); 3] = [
           (
             0xdf08,
             "swi 8",
             ThumbInstruction::SoftwareInterrupt(software_interrupt::Op::new()
-              .with_comment(8)),
+              .with_comment(8)
+            ),
           ),
           (
             0x0091,
@@ -427,7 +481,15 @@ mod tests {
               .with_reg_dest(RegisterName3Bit::R1)
               .with_reg_src(RegisterName3Bit::R2)
               .with_offset(2.into())
-              .with_op(move_shifted_reg::ShiftOp::Lsl)),
+              .with_op(move_shifted_reg::ShiftOp::Lsl)
+            ),
+          ),
+          (
+            0xe7fe,
+            "b 0",
+            ThumbInstruction::UnconditionalBranch(unconditional_branch::Op::new()
+              .with_offset11((-4 >> 1).into())
+            ),
           )
         ];
     }
