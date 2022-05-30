@@ -2,10 +2,10 @@
   x case IsTHUMBSoftwareInterrupt(opcode):
     return THUMBSoftwareInterrupt
 
-  case IsUnconditionalBranch(opcode):
+  x case IsUnconditionalBranch(opcode):
     return UnconditionalBranch
 
-  case IsConditionalBranch(opcode):
+  x case IsConditionalBranch(opcode):
     return ConditionalBranch
 
   case IsMultipleLoadstore(opcode):
@@ -59,7 +59,7 @@
 use modular_bitfield::{bitfield, specifiers::*, BitfieldSpecifier, Specifier};
 use std::fmt::{Debug, Display};
 
-use crate::common::RegisterName;
+use crate::common::{LoadOrStore, LoadOrStore::*, RegisterName};
 use modular_bitfield::specifiers::*;
 
 pub const THUMB_INSTR_SIZE_BITS: u8 = 16;
@@ -96,7 +96,9 @@ impl Display for Operand5Bit {
 pub enum ThumbInstruction {
     SoftwareInterrupt(software_interrupt::Op),
     UnconditionalBranch(unconditional_branch::Op),
+    MultipleLoadstore(multiple_load_store::Op),
     MoveShiftedRegister(move_shifted_reg::Op),
+    ConditionalBranch(conditional_branch::Op),
 }
 
 use ThumbInstruction::*;
@@ -107,6 +109,10 @@ impl ThumbInstruction {
             SoftwareInterrupt(software_interrupt::parse(instr))
         } else if unconditional_branch::is_unconditional_branch(instr) {
             UnconditionalBranch(unconditional_branch::parse(instr))
+        } else if conditional_branch::is_conditional_branch(instr) {
+            ConditionalBranch(conditional_branch::parse(instr))
+        } else if multiple_load_store::is_multiple_load_store(instr) {
+            MultipleLoadstore(multiple_load_store::parse(instr))
         } else if move_shifted_reg::is_move_shifted_reg(instr) {
             MoveShiftedRegister(move_shifted_reg::parse(instr))
         } else {
@@ -125,6 +131,8 @@ impl ThumbInstruction {
                 op.reg_src().to_string(),
                 op.offset().to_string(),
             ),
+            MultipleLoadstore(op) => Two(format!("{}!", op.base_reg()), op.reg_list().to_string()),
+            ConditionalBranch(op) => One(op.offset8().to_string()),
         }
     }
 
@@ -134,6 +142,11 @@ impl ThumbInstruction {
         match self {
             SoftwareInterrupt(_) => "swi".into(),
             UnconditionalBranch(_) => "b".into(),
+            ConditionalBranch(op) => format!("b{}", op.condition()),
+            MultipleLoadstore(op) => match op.load_or_store() {
+                Load => "ldmia".into(),
+                Store => "stmia".into(),
+            },
             MoveShiftedRegister(op) => match op.op() {
                 Lsl => "lsl".into(),
                 Lsr => "lsr".into(),
@@ -151,6 +164,7 @@ impl Display for ThumbInstruction {
 
         match operands {
             One(op1) => write!(f, "{} {}", op, op1),
+            Two(op1, op2) => write!(f, "{} {}, {}", op, op1, op2),
             Three(dst, op1, op2) => write!(f, "{} {}, {}, {}", op, dst, op1, op2),
             _ => todo!("More operands stringified"),
         }
@@ -247,8 +261,10 @@ pub mod unconditional_branch {
 
     impl Display for Offset11 {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            let sign_extended = (0b1111_1000_0000_0000 | self.value()) as i16;
+            let mask = 1 << (11 - 1) as i16;
+            let sign_extended = (self.value() as i16 ^ mask) - mask;
             // PC is two instructions ahead, so to recontruct add 2 * 2
+            // Offset is half-word aligned, so to recontruct shift left by 1
             let val = (sign_extended << 1) + (THUMB_INSTR_SIZE_BYTES * 2) as i16;
             write!(f, "{}", val)
         }
@@ -274,20 +290,128 @@ pub mod unconditional_branch {
 }
 
 pub mod conditional_branch {
+    use super::*;
+    use crate::common::Condition;
+
     pub fn is_conditional_branch(opcode: u16) -> bool {
         let conditional_branch_format: u16 = 0b1101_0000_0000_0000;
         let format_mask: u16 = 0b1111_0000_0000_0000;
         let extracted_format = opcode & format_mask;
         extracted_format == conditional_branch_format
     }
+
+    pub fn parse(instr: u16) -> Op {
+        Op::from_bytes(instr.to_le_bytes())
+    }
+
+    #[bitfield(bits = 8)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, BitfieldSpecifier)]
+    /// Two's complement 12-bit signed PC relative offset that is 2-byte aligned (i.e. bit 0 is 0)
+    pub struct Offset8 {
+        value: B8,
+    }
+
+    impl From<i8> for Offset8 {
+        fn from(value: i8) -> Self {
+            Offset8::new().with_value(value as u8)
+        }
+    }
+
+    impl Display for Offset8 {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let mask = 1 << (8 - 1) as i16;
+            let sign_extended = (self.value() as i16 ^ mask) - mask;
+            // PC is two instructions ahead, so to recontruct add 2 * 2
+            // Offset is half-word aligned, so to recontruct shift left by 1
+            let val = (sign_extended << 1) + (THUMB_INSTR_SIZE_BYTES * 2) as i16;
+            write!(f, "{}", val)
+        }
+    }
+
+    #[bitfield(bits = 16)]
+    #[derive(Clone, Copy, Debug, Eq)]
+    pub struct Op {
+        pub offset8: Offset8,
+        pub condition: Condition,
+        #[skip]
+        ignored: B4,
+    }
+
+    impl PartialEq for Op {
+        fn eq(&self, other: &Self) -> bool {
+            self.offset8() == other.offset8() && self.condition() == other.condition()
+        }
+    }
 }
 
 pub mod multiple_load_store {
+    use crate::common::LoadOrStore;
+    use bitvec::order::Lsb0;
+    use bitvec::view::BitView;
+
+    use super::*;
+
     pub fn is_multiple_load_store(opcode: u16) -> bool {
         let multiple_load_store_format: u16 = 0b1100_0000_0000_0000;
         let format_mask: u16 = 0b1111_0000_0000_0000;
         let extracted_format = opcode & format_mask;
         extracted_format == multiple_load_store_format
+    }
+
+    pub fn parse(instr: u16) -> Op {
+        Op::from_bytes(instr.to_le_bytes())
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct RegisterList8Bit(u8);
+
+    impl Display for RegisterList8Bit {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(
+                f,
+                "{{{}}}",
+                self.0
+                    .view_bits()
+                    .iter()
+                    .enumerate()
+                    .filter_map(
+                        |(reg, reg_bit): (usize, bitvec::ptr::BitRef<'_, _, _, Lsb0>)| {
+                            if *reg_bit {
+                                Some(RegisterName::from(reg as u8).to_string())
+                            } else {
+                                None
+                            }
+                        }
+                    )
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            )
+        }
+    }
+
+    #[bitfield(bits = 16)]
+    #[derive(Clone, Copy, Debug, Eq)]
+    pub struct Op {
+        pub regs: B8,
+        pub base_reg: RegisterName3Bit,
+        pub load_or_store: LoadOrStore,
+        #[skip]
+        ignored: B4,
+    }
+
+    impl Op {
+        pub fn reg_list(&self) -> RegisterList8Bit {
+            let regs = self.regs();
+            RegisterList8Bit(regs)
+        }
+    }
+
+    impl PartialEq for Op {
+        fn eq(&self, other: &Self) -> bool {
+            self.regs() == other.regs()
+                && self.base_reg() == other.base_reg()
+                && self.load_or_store() == other.load_or_store()
+        }
     }
 }
 
@@ -461,12 +585,14 @@ pub mod move_shifted_reg {
 
 #[cfg(test)]
 mod tests {
+    use super::RegisterName3Bit::*;
     use super::*;
+    use crate::common::Condition::*;
     use lazy_static::lazy_static;
 
     lazy_static! {
     // Instruction hex, assembly string, expected decoded instruction
-        static ref TEST_INSTRUCTIONS: [(u16, &'static str, ThumbInstruction); 3] = [
+        static ref TEST_INSTRUCTIONS: [(u16, &'static str, ThumbInstruction); 7] = [
           (
             0xdf08,
             "swi 8",
@@ -489,6 +615,40 @@ mod tests {
             "b 0",
             ThumbInstruction::UnconditionalBranch(unconditional_branch::Op::new()
               .with_offset11((-4 >> 1).into())
+            ),
+          ),
+          (
+            0xdcfe,
+            "bgt 0",
+            ThumbInstruction::ConditionalBranch(conditional_branch::Op::new()
+              .with_offset8((-4 >> 1).into())
+              .with_condition(Gt)
+            ),
+          ),
+          (
+            0xd401,
+            "bmi 6",
+            ThumbInstruction::ConditionalBranch(conditional_branch::Op::new()
+              .with_offset8((2 >> 1).into())
+              .with_condition(Mi)
+            ),
+          ),
+          (
+            0xc0f8,
+            "stmia r0!, {r3, r4, r5, r6, r7}",
+            ThumbInstruction::MultipleLoadstore(multiple_load_store::Op::new()
+                .with_base_reg(R0)
+                .with_load_or_store(Store)
+                .with_regs(0b1111_1000)
+            ),
+          ),
+          (
+            0xc812,
+            "ldmia r0!, {r1, r4}",
+            ThumbInstruction::MultipleLoadstore(multiple_load_store::Op::new()
+                .with_base_reg(R0)
+                .with_load_or_store(Load)
+                .with_regs(0b0001_0010)
             ),
           )
         ];
