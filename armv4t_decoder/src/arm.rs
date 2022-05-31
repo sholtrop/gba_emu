@@ -1,7 +1,8 @@
-use crate::common::{Condition, LoadOrStore, RegisterName};
+use crate::common::{Condition, LoadOrStore, RegisterName, Signedness};
 use modular_bitfield::{bitfield, specifiers::*, BitfieldSpecifier, Specifier};
 use std::fmt::{Debug, Display};
 use RegisterName::*;
+use Signedness::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Instruction {
@@ -256,7 +257,6 @@ impl Instruction {
 
     pub fn op_mnemonic(&self) -> String {
         use halfword_data_transfer::ShType::*;
-        use multiply_long::Signedness::*;
         use AccumulateType::*;
         use LoadOrStore::*;
         use PreOrPostIndexing::*;
@@ -874,13 +874,6 @@ pub mod multiply_long {
         Op::from_bytes(instr.to_le_bytes())
     }
 
-    #[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
-    #[bits = 1]
-    pub enum Signedness {
-        Unsigned,
-        Signed,
-    }
-
     #[bitfield(bits = 32)]
     #[derive(Clone, Copy, Debug, Eq)]
     pub struct Op {
@@ -1442,7 +1435,6 @@ pub mod halfword_data_transfer {
 #[cfg(test)]
 mod tests {
     use super::halfword_data_transfer::ShType::*;
-    use super::multiply_long::Signedness::*;
     use super::AccumulateType::*;
     use super::ByteOrWord;
     use super::Condition::*;

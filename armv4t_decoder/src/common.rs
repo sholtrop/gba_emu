@@ -74,3 +74,10 @@ pub enum LoadOrStore {
     Store,
     Load,
 }
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
+#[bits = 1]
+pub enum Signedness {
+    Unsigned,
+    Signed,
+}
