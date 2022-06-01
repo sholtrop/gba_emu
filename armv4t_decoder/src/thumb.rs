@@ -25,22 +25,22 @@ use bitvec::view::BitView;
   x case IsLoadStoreHalfword(opcode):
     return LoadStoreHalfword
 
-  case IsSPRelativeLoadStore(opcode):
+  x case IsSPRelativeLoadStore(opcode):
     return SPRelatvieLoadStore
 
-  case IsLoadAddress(opcode):
+  x case IsLoadAddress(opcode):
     return LoadAddress
 
-  case IsLoadStoreWithImmediateOffset(opcode):
+  x case IsLoadStoreWithImmediateOffset(opcode):
     return LoadStoreWithImmediateOffset
 
-  case IsLoadStoreWithRegisterOffset(opcode):
+  x case IsLoadStoreWithRegisterOffset(opcode):
     return LoadStoreWithRegisterOffset
 
-  case IsLoadStoreSignExtendedByteHalfword(opcode):
+  x case IsLoadStoreSignExtendedByteHalfword(opcode):
     return LoadStoreSignExtendedByteHalfword
 
-  case IsPCRelativeLoad(opcode):
+  x case IsPCRelativeLoad(opcode):
     return PCRelativeLoad
 
   case IsHiRegisterOperationsBranchExchange(opcode):
@@ -61,7 +61,10 @@ use bitvec::view::BitView;
 use modular_bitfield::{bitfield, specifiers::*, BitfieldSpecifier};
 use std::fmt::{Debug, Display};
 
-use crate::common::{LoadOrStore::*, RegisterName};
+use crate::{
+    common::{LoadOrStore::*, RegisterName},
+    thumb::load_address::LoadSource,
+};
 
 pub const THUMB_INSTR_SIZE_BITS: u8 = 16;
 pub const THUMB_INSTR_SIZE_BYTES: u8 = THUMB_INSTR_SIZE_BITS / 8;
@@ -93,6 +96,31 @@ impl Display for Operand5Bit {
     }
 }
 
+#[bitfield(bits = 8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, BitfieldSpecifier)]
+/// Unsigned 10-bit constant that is 4-byte aligned (bit 0-1 are 0), thus stored in 8 bits
+pub struct Offset8 {
+    val: B8,
+}
+
+impl Offset8 {
+    pub fn value(&self) -> u16 {
+        (self.val() as u16) << 2
+    }
+}
+
+impl From<u16> for Offset8 {
+    fn from(value: u16) -> Self {
+        Offset8::new().with_val((value >> 2) as u8)
+    }
+}
+
+impl Display for Offset8 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "#{}", self.value())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThumbInstruction {
     SoftwareInterrupt(software_interrupt::Op),
@@ -104,7 +132,13 @@ pub enum ThumbInstruction {
     LoadStoreHalfWord(load_store_half_word::Op),
     MoveShiftedRegister(move_shifted_reg::Op),
     SpRelativeLoadStore(sp_relative_load_store::Op),
+    LoadAddress(load_address::Op),
     ConditionalBranch(conditional_branch::Op),
+    LoadStoreImmOffset(load_store_imm_offset::Op),
+    LoadStoreRegOffset(load_store_reg_offset::Op),
+    LoadStoreSignExtHalfwordByte(load_store_sign_ext_byte_halfword::Op),
+    PcRelativeLoad(pc_relative_load::Op),
+    HiRegOpsBranchExchange(hi_reg_ops_branch_exchange::Op),
 }
 
 use ThumbInstruction::*;
@@ -129,22 +163,35 @@ impl ThumbInstruction {
             LoadStoreHalfWord(load_store_half_word::parse(instr))
         } else if sp_relative_load_store::is_sp_relative_load_store(instr) {
             SpRelativeLoadStore(sp_relative_load_store::parse(instr))
+        } else if load_address::is_load_address(instr) {
+            LoadAddress(load_address::parse(instr))
         } else if move_shifted_reg::is_move_shifted_reg(instr) {
             MoveShiftedRegister(move_shifted_reg::parse(instr))
+        } else if load_store_imm_offset::is_load_store_imm_offset(instr) {
+            LoadStoreImmOffset(load_store_imm_offset::parse(instr))
+        } else if load_store_reg_offset::is_load_store_reg_offset(instr) {
+            LoadStoreRegOffset(load_store_reg_offset::parse(instr))
+        } else if load_store_sign_ext_byte_halfword::is_load_store_sign_ext_byte_halfword(instr) {
+            LoadStoreSignExtHalfwordByte(load_store_sign_ext_byte_halfword::parse(instr))
+        } else if pc_relative_load::is_pc_relative_load(instr) {
+            PcRelativeLoad(pc_relative_load::parse(instr))
+        } else if hi_reg_ops_branch_exchange::is_hi_reg_ops_branch_exchange(instr) {
+            HiRegOpsBranchExchange(hi_reg_ops_branch_exchange::parse(instr))
         } else {
             todo!("Unimplemented THUMB instruction {instr}")
         }
     }
 
     fn get_operands(&self) -> Operands {
+        use hi_reg_ops_branch_exchange::OpCode::*;
         use Operands::*;
 
         match self {
             SoftwareInterrupt(op) => One(op.comment().to_string()),
             UnconditionalBranch(op) => One(op.offset11().to_string()),
             MoveShiftedRegister(op) => Three(
-                op.reg_dest().to_string(),
-                op.reg_src().to_string(),
+                op.dest_reg().to_string(),
+                op.src_reg().to_string(),
                 op.offset().to_string(),
             ),
             MultipleLoadstore(op) => Two(format!("{}!", op.base_reg()), op.reg_list().to_string()),
@@ -168,15 +215,62 @@ impl ThumbInstruction {
                 Two(rd, op1)
             }
             SpRelativeLoadStore(op) => {
-                let rd = op.reg_dest().to_string();
+                let rd = op.dest_reg().to_string();
                 let op1 = format!("[sp, #{}]", op.offset());
                 Two(rd, op1)
+            }
+            LoadAddress(op) => {
+                let op2 = match op.src() {
+                    LoadSource::Pc => "pc".into(),
+                    LoadSource::Sp => "sp".into(),
+                };
+                Three(op.dest_reg().to_string(), op2, op.word8().to_string())
+            }
+            LoadStoreImmOffset(op) => {
+                let rd = op.dest_reg().to_string();
+                let op1 = format!("[{}, #{}]", op.base_reg(), op.offset());
+                Two(rd, op1)
+            }
+            LoadStoreRegOffset(op) => {
+                let rd = op.dest_reg().to_string();
+                let op1 = format!("[{}, {}]", op.base_reg(), op.offset_reg());
+                Two(rd, op1)
+            }
+            LoadStoreSignExtHalfwordByte(op) => {
+                let rd = op.dest_reg().to_string();
+                let op1 = format!("[{}, {}]", op.base_reg(), op.offset_reg());
+                Two(rd, op1)
+            }
+            PcRelativeLoad(op) => {
+                let rd = op.dest_reg().to_string();
+                let op1 = format!("[pc, {}]", op.word8());
+                Two(rd, op1)
+            }
+            HiRegOpsBranchExchange(op) => {
+                let dst = u8::from(op.dest_reg());
+                let dst = if op.hi_op1() {
+                    RegisterName::from(dst + 8)
+                } else {
+                    RegisterName::from(dst)
+                };
+                let src = u8::from(op.source_reg());
+                let src = if op.hi_op2() {
+                    RegisterName::from(src + 8)
+                } else {
+                    RegisterName::from(src)
+                };
+                if op.opcode() == Bx {
+                    One(src.to_string())
+                } else {
+                    Two(dst.to_string(), src.to_string())
+                }
             }
             ConditionalBranch(op) => One(op.offset8().to_string()),
         }
     }
 
     fn get_mnemonic(&self) -> String {
+        use crate::common::ByteOrWord::*;
         use move_shifted_reg::ShiftOp::*;
 
         match self {
@@ -205,7 +299,28 @@ impl ThumbInstruction {
                 Load => "ldr".into(),
                 Store => "str".into(),
             },
+            LoadAddress(_) => "add".into(),
             AddOffsetToStackPointer(_) => "add".into(),
+            LoadStoreImmOffset(op) => match (op.load_or_store(), op.byte_or_word()) {
+                (Store, Word) => "str".into(),
+                (Store, Byte) => "strb".into(),
+                (Load, Word) => "ldr".into(),
+                (Load, Byte) => "ldrb".into(),
+            },
+            LoadStoreRegOffset(op) => match (op.load_or_store(), op.byte_or_word()) {
+                (Store, Word) => "str".into(),
+                (Store, Byte) => "strb".into(),
+                (Load, Word) => "ldr".into(),
+                (Load, Byte) => "ldrb".into(),
+            },
+            LoadStoreSignExtHalfwordByte(op) => match (op.sign_extend(), op.h_flag()) {
+                (false, false) => "strh".into(),
+                (false, true) => "ldrh".into(),
+                (true, false) => "ldsb".into(),
+                (true, true) => "ldsh".into(),
+            },
+            PcRelativeLoad(_) => "ldr".into(),
+            HiRegOpsBranchExchange(op) => op.opcode().to_string(),
         }
     }
 }
@@ -255,6 +370,22 @@ impl Display for RegisterName3Bit {
                 R7 => 7,
             }
         )
+    }
+}
+
+impl From<RegisterName3Bit> for u8 {
+    fn from(reg_list: RegisterName3Bit) -> u8 {
+        use RegisterName3Bit::*;
+        match reg_list {
+            R0 => 0,
+            R1 => 1,
+            R2 => 2,
+            R3 => 3,
+            R4 => 4,
+            R5 => 5,
+            R6 => 6,
+            R7 => 7,
+        }
     }
 }
 
@@ -533,7 +664,7 @@ pub mod add_offset_to_stack_pointer {
     #[bitfield(bits = 16)]
     #[derive(Clone, Copy, Debug, Eq)]
     pub struct Op {
-        pub imm8: B7,
+        pub imm7: B7,
         pub sign: Signedness,
         #[skip]
         ignored: B8,
@@ -541,8 +672,8 @@ pub mod add_offset_to_stack_pointer {
 
     impl Op {
         pub fn get_imm(&self) -> i16 {
-            dbg!(self.imm8());
-            let val = (self.imm8() as i16) << 2;
+            dbg!(self.imm7());
+            let val = (self.imm7() as i16) << 2;
             if self.sign() == Signed {
                 -val
             } else {
@@ -553,7 +684,7 @@ pub mod add_offset_to_stack_pointer {
 
     impl PartialEq for Op {
         fn eq(&self, other: &Self) -> bool {
-            self.imm8() == other.imm8() && self.sign() == other.sign()
+            self.imm7() == other.imm7() && self.sign() == other.sign()
         }
     }
 }
@@ -673,7 +804,7 @@ pub mod sp_relative_load_store {
     #[derive(Clone, Copy, Debug, Eq)]
     pub struct Op {
         pub word8: B8,
-        pub reg_dest: RegisterName3Bit,
+        pub dest_reg: RegisterName3Bit,
         pub load_or_store: LoadOrStore,
         #[skip]
         ignored: B4,
@@ -697,63 +828,291 @@ pub mod sp_relative_load_store {
     impl PartialEq for Op {
         fn eq(&self, other: &Self) -> bool {
             self.word8() == other.word8()
-                && self.reg_dest() == other.reg_dest()
+                && self.dest_reg() == other.dest_reg()
                 && self.load_or_store() == other.load_or_store()
         }
     }
 }
 
 pub mod load_address {
+    use super::*;
+
     pub fn is_load_address(opcode: u16) -> bool {
-        let load_address_format: u16 = 0b0110_0000_0000_0000;
+        let load_address_format: u16 = 0b1010_0000_0000_0000;
         let format_mask: u16 = 0b1111_0000_0000_0000;
         let extracted_format = opcode & format_mask;
         extracted_format == load_address_format
     }
+
+    pub fn parse(instr: u16) -> Op {
+        Op::from_bytes(instr.to_le_bytes())
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, BitfieldSpecifier)]
+    pub enum LoadSource {
+        Pc,
+        Sp,
+    }
+
+    impl Display for LoadSource {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                LoadSource::Pc => write!(f, "pc"),
+                LoadSource::Sp => write!(f, "sp"),
+            }
+        }
+    }
+
+    #[bitfield(bits = 16)]
+    #[derive(Clone, Copy, Debug, Eq)]
+    pub struct Op {
+        pub word8: Offset8,
+        pub dest_reg: RegisterName3Bit,
+        pub src: LoadSource,
+        #[skip]
+        ignored: B4,
+    }
+
+    impl PartialEq for Op {
+        fn eq(&self, other: &Self) -> bool {
+            self.word8() == other.word8()
+                && self.dest_reg() == other.dest_reg()
+                && self.src() == other.src()
+        }
+    }
 }
 
 pub mod load_store_imm_offset {
+    use super::*;
+    use crate::common::{ByteOrWord, ByteOrWord::*, LoadOrStore};
+
     pub fn is_load_store_imm_offset(opcode: u16) -> bool {
-        let load_store_imm_offset_format: u16 = 0b0101_0000_0000_0000;
-        let format_mask: u16 = 0b1111_0000_0000_0000;
+        let load_store_imm_offset_format: u16 = 0b0110_0000_0000_0000;
+        let format_mask: u16 = 0b1110_0000_0000_0000;
         let extracted_format = opcode & format_mask;
         extracted_format == load_store_imm_offset_format
+    }
+
+    pub fn parse(instr: u16) -> Op {
+        Op::from_bytes(instr.to_le_bytes())
+    }
+
+    #[bitfield(bits = 16)]
+    #[derive(Clone, Copy, Debug, Eq)]
+    pub struct Op {
+        pub dest_reg: RegisterName3Bit,
+        pub base_reg: RegisterName3Bit,
+        // 5-bit (Byte) or 7-bit (Word) offset
+        pub offset5: B5,
+        pub load_or_store: LoadOrStore,
+        pub byte_or_word: ByteOrWord,
+        #[skip]
+        ignore: B3,
+    }
+
+    impl Op {
+        pub fn offset(&self) -> u8 {
+            match self.byte_or_word() {
+                Byte => self.offset5(),
+                Word => self.offset5() << 2,
+            }
+        }
+
+        pub fn with_offset(&self, offset: u8) -> Self {
+            let offset = match self.byte_or_word() {
+                Byte => offset,
+                Word => offset >> 2,
+            };
+            self.with_offset5(offset)
+        }
+
+        pub fn set_offset(&mut self, offset: u8) {
+            let offset = match self.byte_or_word() {
+                Byte => offset,
+                Word => offset >> 2,
+            };
+            self.set_offset5(offset);
+        }
+    }
+
+    impl PartialEq for Op {
+        fn eq(&self, other: &Self) -> bool {
+            self.dest_reg() == other.dest_reg()
+                && self.base_reg() == other.base_reg()
+                && self.offset5() == other.offset5()
+                && self.load_or_store() == other.load_or_store()
+                && self.byte_or_word() == other.byte_or_word()
+        }
     }
 }
 
 pub mod load_store_reg_offset {
+    use super::*;
+    use crate::common::{ByteOrWord, LoadOrStore};
+
+    use super::RegisterName3Bit;
+
     pub fn is_load_store_reg_offset(opcode: u16) -> bool {
-        let load_store_reg_offset_format: u16 = 0b0100_0000_0000_0000;
-        let format_mask: u16 = 0b1111_0000_0000_0000;
+        let load_store_reg_offset_format: u16 = 0b0101_0000_0000_0000;
+        let format_mask: u16 = 0b1111_0010_0000_0000;
         let extracted_format = opcode & format_mask;
         extracted_format == load_store_reg_offset_format
+    }
+
+    pub fn parse(instr: u16) -> Op {
+        Op::from_bytes(instr.to_le_bytes())
+    }
+
+    #[bitfield(bits = 16)]
+    #[derive(Clone, Copy, Debug, Eq)]
+    pub struct Op {
+        pub dest_reg: RegisterName3Bit,
+        pub base_reg: RegisterName3Bit,
+        pub offset_reg: RegisterName3Bit,
+        #[skip]
+        ignored: B1,
+        pub byte_or_word: ByteOrWord,
+        pub load_or_store: LoadOrStore,
+        #[skip]
+        ignored: B4,
+    }
+
+    impl PartialEq for Op {
+        fn eq(&self, other: &Self) -> bool {
+            self.dest_reg() == other.dest_reg()
+                && self.base_reg() == other.base_reg()
+                && self.offset_reg() == other.offset_reg()
+                && self.byte_or_word() == other.byte_or_word()
+                && self.load_or_store() == other.load_or_store()
+        }
     }
 }
 
 pub mod load_store_sign_ext_byte_halfword {
+    use crate::common::Signedness;
+
+    use super::*;
+
     pub fn is_load_store_sign_ext_byte_halfword(opcode: u16) -> bool {
-        let load_store_sign_ext_byte_halfword_format: u16 = 0b0011_0000_0000_0000;
-        let format_mask: u16 = 0b1111_0000_0000_0000;
+        let load_store_sign_ext_byte_halfword_format: u16 = 0b0101_0010_0000_0000;
+        let format_mask: u16 = 0b1111_0010_0000_0000;
         let extracted_format = opcode & format_mask;
         extracted_format == load_store_sign_ext_byte_halfword_format
+    }
+
+    pub fn parse(instr: u16) -> Op {
+        Op::from_bytes(instr.to_le_bytes())
+    }
+
+    #[bitfield(bits = 16)]
+    #[derive(Clone, Copy, Debug, Eq)]
+    pub struct Op {
+        pub dest_reg: RegisterName3Bit,
+        pub base_reg: RegisterName3Bit,
+        pub offset_reg: RegisterName3Bit,
+        #[skip]
+        ignored: B1,
+        pub sign_extend: bool,
+        pub h_flag: bool,
+        #[skip]
+        ignored: B4,
+    }
+
+    impl PartialEq for Op {
+        fn eq(&self, other: &Self) -> bool {
+            self.dest_reg() == other.dest_reg()
+                && self.base_reg() == other.base_reg()
+                && self.offset_reg() == other.offset_reg()
+                && self.sign_extend() == other.sign_extend()
+                && self.h_flag() == other.h_flag()
+        }
     }
 }
 
 pub mod pc_relative_load {
+    use super::*;
+
     pub fn is_pc_relative_load(opcode: u16) -> bool {
-        let pc_relative_load_format: u16 = 0b0010_0000_0000_0000;
-        let format_mask: u16 = 0b1111_0000_0000_0000;
+        let pc_relative_load_format: u16 = 0b0100_1000_0000_0000;
+        let format_mask: u16 = 0b1111_1000_0000_0000;
         let extracted_format = opcode & format_mask;
         extracted_format == pc_relative_load_format
+    }
+
+    pub fn parse(instr: u16) -> Op {
+        Op::from_bytes(instr.to_le_bytes())
+    }
+
+    #[bitfield(bits = 16)]
+    #[derive(Clone, Copy, Debug, Eq)]
+    pub struct Op {
+        pub word8: Offset8,
+        pub dest_reg: RegisterName3Bit,
+        #[skip]
+        ignored: B5,
+    }
+
+    impl PartialEq for Op {
+        fn eq(&self, other: &Self) -> bool {
+            self.word8() == other.word8() && self.dest_reg() == other.dest_reg()
+        }
     }
 }
 
 pub mod hi_reg_ops_branch_exchange {
+    use super::*;
+
     pub fn is_hi_reg_ops_branch_exchange(opcode: u16) -> bool {
-        let hi_reg_ops_branch_exchange_format: u16 = 0b0001_0000_0000_0000;
-        let format_mask: u16 = 0b1111_0000_0000_0000;
+        let hi_reg_ops_branch_exchange_format: u16 = 0b0100_0100_0000_0000;
+        let format_mask: u16 = 0b1111_1100_0000_0000;
         let extracted_format = opcode & format_mask;
         extracted_format == hi_reg_ops_branch_exchange_format
+    }
+
+    pub fn parse(instr: u16) -> Op {
+        Op::from_bytes(instr.to_le_bytes())
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
+    #[bits = 2]
+    pub enum OpCode {
+        Add = 0b00,
+        Cmp = 0b01,
+        Mov = 0b10,
+        Bx = 0b11,
+    }
+
+    impl Display for OpCode {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                OpCode::Add => write!(f, "add"),
+                OpCode::Cmp => write!(f, "cmp"),
+                OpCode::Mov => write!(f, "mov"),
+                OpCode::Bx => write!(f, "bx"),
+            }
+        }
+    }
+
+    #[bitfield(bits = 16)]
+    #[derive(Clone, Copy, Debug, Eq)]
+    pub struct Op {
+        pub dest_reg: RegisterName3Bit,
+        pub source_reg: RegisterName3Bit,
+        pub hi_op2: bool,
+        pub hi_op1: bool,
+        pub opcode: OpCode,
+        #[skip]
+        ignored: B6,
+    }
+
+    impl PartialEq for Op {
+        fn eq(&self, other: &Self) -> bool {
+            self.dest_reg() == other.dest_reg()
+                && self.source_reg() == other.source_reg()
+                && self.hi_op1() == other.hi_op1()
+                && self.hi_op2() == other.hi_op2()
+                && self.opcode() == other.opcode()
+        }
     }
 }
 
@@ -805,8 +1164,8 @@ pub mod move_shifted_reg {
     #[bitfield(bits = 16)]
     #[derive(Clone, Copy, Debug, Eq)]
     pub struct Op {
-        pub reg_dest: RegisterName3Bit,
-        pub reg_src: RegisterName3Bit,
+        pub dest_reg: RegisterName3Bit,
+        pub src_reg: RegisterName3Bit,
         pub offset: Operand5Bit,
         pub op: ShiftOp,
         #[skip]
@@ -814,8 +1173,8 @@ pub mod move_shifted_reg {
     }
     impl PartialEq for Op {
         fn eq(&self, other: &Self) -> bool {
-            self.reg_dest() == other.reg_dest()
-                && self.reg_src() == other.reg_src()
+            self.dest_reg() == other.dest_reg()
+                && self.src_reg() == other.src_reg()
                 && self.offset() == other.offset()
                 && self.op() == other.op()
         }
@@ -828,16 +1187,19 @@ pub mod move_shifted_reg {
 
 #[cfg(test)]
 mod tests {
+    use super::hi_reg_ops_branch_exchange::OpCode::*;
+    use super::load_address::LoadSource::*;
     use super::long_branch_with_link::OffsetHighLow::*;
     use super::RegisterName3Bit::*;
     use super::*;
+    use crate::common::ByteOrWord::*;
     use crate::common::Condition::*;
     use crate::common::Signedness::*;
     use lazy_static::lazy_static;
 
     lazy_static! {
     // Instruction hex, assembly string, expected decoded instruction
-        static ref TEST_INSTRUCTIONS: [(u16, &'static str, ThumbInstruction); 15] = [
+        static ref TEST_INSTRUCTIONS: [(u16, &'static str, ThumbInstruction); 27] = [
           (
             0xdf08,
             "swi 8",
@@ -849,8 +1211,8 @@ mod tests {
             0x0091,
             "lsl r1, r2, #2",
             ThumbInstruction::MoveShiftedRegister(move_shifted_reg::Op::new()
-              .with_reg_dest(RegisterName3Bit::R1)
-              .with_reg_src(RegisterName3Bit::R2)
+              .with_dest_reg(RegisterName3Bit::R1)
+              .with_src_reg(RegisterName3Bit::R2)
               .with_offset(2.into())
               .with_op(move_shifted_reg::ShiftOp::Lsl)
             ),
@@ -918,7 +1280,7 @@ mod tests {
             0xb043,
             "add sp, #268",
             ThumbInstruction::AddOffsetToStackPointer(add_offset_to_stack_pointer::Op::new()
-              .with_imm8((268_u16 >> 2) as u8)
+              .with_imm7((268_u16 >> 2) as u8)
               .with_sign(Unsigned)
             ),
           ),
@@ -966,9 +1328,132 @@ mod tests {
             ThumbInstruction::SpRelativeLoadStore(sp_relative_load_store::Op::new()
               .with_load_or_store(Store)
               .with_offset(492)
-              .with_reg_dest(R4)
+              .with_dest_reg(R4)
+            )
+          ),
+          (
+            0x9a01,
+            "ldr r2, [sp, #4]",
+            ThumbInstruction::SpRelativeLoadStore(sp_relative_load_store::Op::new()
+              .with_load_or_store(Load)
+              .with_offset(4)
+              .with_dest_reg(R2)
+            )
+          ),
+          (
+            0xa28f,
+            "add r2, pc, #572",
+            ThumbInstruction::LoadAddress(load_address::Op::new()
+              .with_dest_reg(R2)
+              .with_src(Pc)
+              .with_word8(572.into())
+            )
+          ),
+          (
+            0xae35,
+            "add r6, sp, #212",
+            ThumbInstruction::LoadAddress(load_address::Op::new()
+              .with_dest_reg(R6)
+              .with_src(Sp)
+              .with_word8(212.into())
+            )
+          ),
+          (
+            0x6f6a,
+            "ldr r2, [r5, #116]",
+            ThumbInstruction::LoadStoreImmOffset(load_store_imm_offset::Op::new()
+              .with_load_or_store(Load)
+              .with_offset(116)
+              .with_base_reg(R5)
+              .with_dest_reg(R2)
+            )
+          ),
+          (
+            0x7341,
+            "strb r1, [r0, #13]",
+            ThumbInstruction::LoadStoreImmOffset(load_store_imm_offset::Op::new()
+              .with_load_or_store(Store)
+              .with_byte_or_word(Byte)
+              .with_offset(13)
+              .with_base_reg(R0)
+              .with_dest_reg(R1)
+            )
+          ),
+          (
+            0x5193,
+            "str r3, [r2, r6]",
+            ThumbInstruction::LoadStoreRegOffset(load_store_reg_offset::Op::new()
+              .with_load_or_store(Store)
+              .with_base_reg(R2)
+              .with_dest_reg(R3)
+              .with_offset_reg(R6)
+            )
+          ),
+          (
+            0x5dc2,
+            "ldrb r2, [r0, r7]",
+            ThumbInstruction::LoadStoreRegOffset(load_store_reg_offset::Op::new()
+              .with_load_or_store(Load)
+              .with_base_reg(R0)
+              .with_dest_reg(R2)
+              .with_offset_reg(R7)
+              .with_byte_or_word(Byte)
+            )
+          ),
+          (
+            0x521c,
+            "strh r4, [r3, r0]",
+            ThumbInstruction::LoadStoreSignExtHalfwordByte(load_store_sign_ext_byte_halfword::Op::new()
+              .with_dest_reg(R4)
+              .with_base_reg(R3)
+              .with_offset_reg(R0)
+              .with_sign_extend(false)
+              .with_h_flag(false)
+
+            )
+          ),
+          (
+            0x567a,
+            "ldsb r2, [r7, r1]",
+            ThumbInstruction::LoadStoreSignExtHalfwordByte(load_store_sign_ext_byte_halfword::Op::new()
+              .with_dest_reg(R2)
+              .with_base_reg(R7)
+              .with_offset_reg(R1)
+              .with_sign_extend(true)
+              .with_h_flag(false)
+            )
+          ),
+          (
+            0x5ea3,
+            "ldsh r3, [r4, r2]",
+            ThumbInstruction::LoadStoreSignExtHalfwordByte(load_store_sign_ext_byte_halfword::Op::new()
+              .with_dest_reg(R3)
+              .with_base_reg(R4)
+              .with_offset_reg(R2)
+              .with_sign_extend(true)
+              .with_h_flag(true)
+            )
+          ),
+          (
+            0x4bd3,
+            "ldr r3, [pc, #844]",
+            ThumbInstruction::PcRelativeLoad(pc_relative_load::Op::new()
+              .with_word8(844.into())
+              .with_dest_reg(R3)
+            )
+          ),
+          (
+            0x44af,
+            "add r15, r5",
+            ThumbInstruction::HiRegOpsBranchExchange(hi_reg_ops_branch_exchange::Op::new()
+              .with_hi_op1(true)
+              .with_dest_reg(R7)
+              .with_hi_op2(false)
+              .with_source_reg(R5)
+              .with_opcode(Add)
             )
           )
+          // TODO, test hiregopsbranchexchange further
         ];
     }
 

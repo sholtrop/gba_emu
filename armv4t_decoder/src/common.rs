@@ -81,3 +81,22 @@ pub enum Signedness {
     Unsigned,
     Signed,
 }
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
+pub enum ByteOrWord {
+    Word,
+    Byte,
+}
+
+impl Display for ByteOrWord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Byte => "b",
+                Self::Word => "",
+            }
+        )
+    }
+}

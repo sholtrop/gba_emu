@@ -1,4 +1,4 @@
-use crate::common::{Condition, LoadOrStore, RegisterName, Signedness};
+use crate::common::{ByteOrWord, Condition, LoadOrStore, RegisterName, Signedness};
 use modular_bitfield::{bitfield, specifiers::*, BitfieldSpecifier, Specifier};
 use std::fmt::{Debug, Display};
 use RegisterName::*;
@@ -331,7 +331,6 @@ impl Instruction {
             DataProcessing(op) => op.condition(),
             SingleDataSwap(op) => op.condition(),
             HalfwordDataTransfer(op) => op.condition(),
-            // HalfwordDataTransferImmediate(_) => todo!(),
         }
     }
 }
@@ -475,25 +474,6 @@ impl Display for RegisterName {
                 R13 => "13",
                 R14 => "14",
                 R15 => "15",
-            }
-        )
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
-pub enum ByteOrWord {
-    Word,
-    Byte,
-}
-
-impl Display for ByteOrWord {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Self::Byte => "b",
-                Self::Word => "",
             }
         )
     }
@@ -1240,6 +1220,8 @@ pub mod psr_transfer_msr {
 }
 
 pub mod single_data_transfer {
+    use crate::common::ByteOrWord;
+
     use super::*;
 
     pub fn is_single_data_transfer(instr: u32) -> bool {
