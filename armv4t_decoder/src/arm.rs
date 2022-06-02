@@ -822,7 +822,7 @@ pub mod multiply {
         pub set_cond: bool,
         pub accumulate: AccumulateType,
         #[skip]
-        ignored2: B6, // 000000
+        ignored: B6, // 000000
         pub condition: Condition,
     }
 
@@ -867,7 +867,7 @@ pub mod multiply_long {
         pub accumulate: AccumulateType,
         pub signedness: Signedness,
         #[skip]
-        ignored2: B5,
+        ignored: B5,
         pub condition: Condition,
     }
 
@@ -1140,10 +1140,10 @@ pub mod psr_transfer_mrs {
         ignored: B12,
         pub reg_dest: RegisterName,
         #[skip]
-        ignored2: B6,
+        ignored: B6,
         pub src_psr: PsrLocation,
         #[skip]
-        ignored3: B5,
+        ignored: B5,
         pub condition: Condition,
     }
 
@@ -1189,7 +1189,7 @@ pub mod psr_transfer_msr {
         ignored: B18,
         pub dest_psr: PsrLocation,
         #[skip]
-        ignored2: B5,
+        ignored: B5,
         pub condition: Condition,
     }
 
@@ -1202,10 +1202,10 @@ pub mod psr_transfer_msr {
         ignored: B10,
         pub dest_psr: PsrLocation,
         #[skip]
-        ignored2: B2,
+        ignored: B2,
         pub is_imm_operand: bool,
         #[skip]
-        ignored3: B2,
+        ignored: B2,
         pub condition: Condition,
     }
 
@@ -1293,10 +1293,10 @@ pub mod single_data_swap {
         pub dest_reg: RegisterName,
         pub base_reg: RegisterName,
         #[skip]
-        ignored2: B2,
+        ignored: B2,
         pub byte_or_word: ByteOrWord,
         #[skip]
-        ignored3: B5,
+        ignored: B5,
         pub condition: Condition,
     }
 
@@ -1343,7 +1343,7 @@ pub mod halfword_data_transfer {
         ignored: B1,
         pub sh_type: ShType,
         #[skip]
-        ignored2: B1,
+        ignored: B1,
         offset_hi: B4,
         pub reg_dest: RegisterName,
         pub base_reg: RegisterName,
@@ -1353,7 +1353,7 @@ pub mod halfword_data_transfer {
         pub up_or_down: UpOrDown,
         pub pre_post_indexing: PreOrPostIndexing,
         #[skip]
-        ignored4: B3,
+        ignored: B3,
         pub condition: Condition,
     }
 

@@ -714,7 +714,7 @@ pub mod push_pop_regs {
         ignored: B2,
         pub load_or_store: LoadOrStore,
         #[skip]
-        ignored2: B4,
+        ignored: B4,
     }
 
     impl Op {
@@ -1199,7 +1199,7 @@ mod tests {
 
     lazy_static! {
     // Instruction hex, assembly string, expected decoded instruction
-        static ref TEST_INSTRUCTIONS: [(u16, &'static str, ThumbInstruction); 27] = [
+        static ref TEST_INSTRUCTIONS: [(u16, &'static str, ThumbInstruction); 30] = [
           (
             0xdf08,
             "swi 8",
@@ -1452,8 +1452,38 @@ mod tests {
               .with_source_reg(R5)
               .with_opcode(Add)
             )
+          ),
+          (
+            0x4564,
+            "cmp r4, r12",
+            ThumbInstruction::HiRegOpsBranchExchange(hi_reg_ops_branch_exchange::Op::new()
+              .with_hi_op1(false)
+              .with_dest_reg(R4)
+              .with_hi_op2(true)
+              .with_source_reg(R4)
+              .with_opcode(Cmp)
+            )
+          ),
+          (
+            0x4758,
+            "bx r11",
+            ThumbInstruction::HiRegOpsBranchExchange(hi_reg_ops_branch_exchange::Op::new()
+              .with_hi_op2(true)
+              .with_source_reg(R3)
+              .with_opcode(Bx)
+            )
+          ),
+          (
+            0x46f7,
+            "mov r15, r14",
+            ThumbInstruction::HiRegOpsBranchExchange(hi_reg_ops_branch_exchange::Op::new()
+              .with_hi_op1(true)
+              .with_dest_reg(R7)
+              .with_hi_op2(true)
+              .with_source_reg(R6)
+              .with_opcode(Mov)
+            )
           )
-          // TODO, test hiregopsbranchexchange further
         ];
     }
 
