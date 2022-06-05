@@ -1,63 +1,5 @@
 use bitvec::order::Lsb0;
 use bitvec::view::BitView;
-/*
-  x case IsTHUMBSoftwareInterrupt(opcode):
-    return THUMBSoftwareInterrupt
-
-  x case IsUnconditionalBranch(opcode):
-    return UnconditionalBranch
-
-  x case IsConditionalBranch(opcode):
-    return ConditionalBranch
-
-  x case IsMultipleLoadstore(opcode):
-    return MultipleLoadstore
-
-  x case IsLongBranchWithLink(opcode):
-    return LongBranchWithLink
-
-  x case IsAddOffsetToStackPointer(opcode):
-    return AddOffsetToStackPointer
-
-  x case IsPushPopRegisters(opcode):
-    return PushPopRegisters
-
-  x case IsLoadStoreHalfword(opcode):
-    return LoadStoreHalfword
-
-  x case IsSPRelativeLoadStore(opcode):
-    return SPRelatvieLoadStore
-
-  x case IsLoadAddress(opcode):
-    return LoadAddress
-
-  x case IsLoadStoreWithImmediateOffset(opcode):
-    return LoadStoreWithImmediateOffset
-
-  x case IsLoadStoreWithRegisterOffset(opcode):
-    return LoadStoreWithRegisterOffset
-
-  x case IsLoadStoreSignExtendedByteHalfword(opcode):
-    return LoadStoreSignExtendedByteHalfword
-
-  x case IsPCRelativeLoad(opcode):
-    return PCRelativeLoad
-
-  case IsHiRegisterOperationsBranchExchange(opcode):
-    return HiRegisterOperationsBranchExchange
-
-  case IsALUOperations(opcode):
-    return ALUOperations
-
-  case IsMoveCompareAddSubtractImmediate(opcode):
-    return MoveCompareAddSubtractImmediate
-
-  case IsAddSubtract(opcode):
-    return AddSubtract
-
-  x case IsMoveShiftedRegister(opcode):
-    return MoveShiftedRegister
-} */
 use modular_bitfield::{bitfield, specifiers::*, BitfieldSpecifier};
 use std::fmt::{Debug, Display};
 
@@ -74,7 +16,6 @@ pub enum Operands {
     One(String),
     Two(String, String),
     Three(String, String, String),
-    Four(String, String, String, String),
 }
 
 #[bitfield(bits = 5)]
@@ -139,6 +80,9 @@ pub enum ThumbInstruction {
     LoadStoreSignExtHalfwordByte(load_store_sign_ext_byte_halfword::Op),
     PcRelativeLoad(pc_relative_load::Op),
     HiRegOpsBranchExchange(hi_reg_ops_branch_exchange::Op),
+    AluOps(alu_ops::Op),
+    MoveCompAddSubtractImm(move_comp_add_sub_imm::Op),
+    AddSub(add_sub::Op),
 }
 
 use ThumbInstruction::*;
@@ -165,8 +109,6 @@ impl ThumbInstruction {
             SpRelativeLoadStore(sp_relative_load_store::parse(instr))
         } else if load_address::is_load_address(instr) {
             LoadAddress(load_address::parse(instr))
-        } else if move_shifted_reg::is_move_shifted_reg(instr) {
-            MoveShiftedRegister(move_shifted_reg::parse(instr))
         } else if load_store_imm_offset::is_load_store_imm_offset(instr) {
             LoadStoreImmOffset(load_store_imm_offset::parse(instr))
         } else if load_store_reg_offset::is_load_store_reg_offset(instr) {
@@ -177,6 +119,14 @@ impl ThumbInstruction {
             PcRelativeLoad(pc_relative_load::parse(instr))
         } else if hi_reg_ops_branch_exchange::is_hi_reg_ops_branch_exchange(instr) {
             HiRegOpsBranchExchange(hi_reg_ops_branch_exchange::parse(instr))
+        } else if alu_ops::is_alu_ops(instr) {
+            AluOps(alu_ops::parse(instr))
+        } else if move_comp_add_sub_imm::is_move_comp_add_sub_imm(instr) {
+            MoveCompAddSubtractImm(move_comp_add_sub_imm::parse(instr))
+        } else if add_sub::is_add_sub(instr) {
+            AddSub(add_sub::parse(instr))
+        } else if move_shifted_reg::is_move_shifted_reg(instr) {
+            MoveShiftedRegister(move_shifted_reg::parse(instr))
         } else {
             todo!("Unimplemented THUMB instruction {instr}")
         }
@@ -253,7 +203,7 @@ impl ThumbInstruction {
                 } else {
                     RegisterName::from(dst)
                 };
-                let src = u8::from(op.source_reg());
+                let src = u8::from(op.src_reg());
                 let src = if op.hi_op2() {
                     RegisterName::from(src + 8)
                 } else {
@@ -265,6 +215,21 @@ impl ThumbInstruction {
                     Two(dst.to_string(), src.to_string())
                 }
             }
+            AluOps(op) => Two(op.dest_reg().to_string(), op.src_reg().to_string()),
+            MoveCompAddSubtractImm(op) => {
+                let rd = op.dest_reg().to_string();
+                let op1 = format!("#{}", op.imm8());
+                Two(rd, op1)
+            }
+            AddSub(op) => Three(
+                op.dest_reg().to_string(),
+                op.src_reg().to_string(),
+                if op.is_imm() {
+                    format!("#{}", op.imm3())
+                } else {
+                    op.offset_reg().to_string()
+                },
+            ),
             ConditionalBranch(op) => One(op.offset8().to_string()),
         }
     }
@@ -320,7 +285,10 @@ impl ThumbInstruction {
                 (true, true) => "ldsh".into(),
             },
             PcRelativeLoad(_) => "ldr".into(),
+            AluOps(op) => op.opcode().to_string(),
+            MoveCompAddSubtractImm(op) => op.opcode().to_string(),
             HiRegOpsBranchExchange(op) => op.opcode().to_string(),
+            AddSub(op) => op.opcode().to_string(),
         }
     }
 }
@@ -370,6 +338,23 @@ impl Display for RegisterName3Bit {
                 R7 => 7,
             }
         )
+    }
+}
+
+impl From<u8> for RegisterName3Bit {
+    fn from(value: u8) -> Self {
+        use RegisterName3Bit::*;
+        match value {
+            0 => R0,
+            1 => R1,
+            2 => R2,
+            3 => R3,
+            4 => R4,
+            5 => R5,
+            6 => R6,
+            7 => R7,
+            _ => panic!("Invalid register 3-bit value: {}", value),
+        }
     }
 }
 
@@ -672,7 +657,6 @@ pub mod add_offset_to_stack_pointer {
 
     impl Op {
         pub fn get_imm(&self) -> i16 {
-            dbg!(self.imm7());
             let val = (self.imm7() as i16) << 2;
             if self.sign() == Signed {
                 -val
@@ -1097,7 +1081,7 @@ pub mod hi_reg_ops_branch_exchange {
     #[derive(Clone, Copy, Debug, Eq)]
     pub struct Op {
         pub dest_reg: RegisterName3Bit,
-        pub source_reg: RegisterName3Bit,
+        pub src_reg: RegisterName3Bit,
         pub hi_op2: bool,
         pub hi_op1: bool,
         pub opcode: OpCode,
@@ -1108,7 +1092,7 @@ pub mod hi_reg_ops_branch_exchange {
     impl PartialEq for Op {
         fn eq(&self, other: &Self) -> bool {
             self.dest_reg() == other.dest_reg()
-                && self.source_reg() == other.source_reg()
+                && self.src_reg() == other.src_reg()
                 && self.hi_op1() == other.hi_op1()
                 && self.hi_op2() == other.hi_op2()
                 && self.opcode() == other.opcode()
@@ -1117,29 +1101,208 @@ pub mod hi_reg_ops_branch_exchange {
 }
 
 pub mod alu_ops {
+    use super::*;
+
     pub fn is_alu_ops(opcode: u16) -> bool {
-        let alu_ops_format: u16 = 0b0000_0000_0000_0000;
-        let format_mask: u16 = 0b1111_0000_0000_0000;
+        let alu_ops_format: u16 = 0b0100_0000_0000_0000;
+        let format_mask: u16 = 0b1111_1100_0000_0000;
         let extracted_format = opcode & format_mask;
         extracted_format == alu_ops_format
     }
+
+    pub fn parse(instr: u16) -> Op {
+        Op::from_bytes(instr.to_le_bytes())
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
+    #[bits = 4]
+    pub enum OpCode {
+        And,
+        Eor,
+        Lsl,
+        Lsr,
+        Asr,
+        Adc,
+        Sbc,
+        Ror,
+        Tst,
+        Neg,
+        Cmp,
+        Cmn,
+        Orr,
+        Mul,
+        Bic,
+        Mvn,
+    }
+
+    impl Display for OpCode {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(
+                f,
+                "{}s",
+                match self {
+                    OpCode::And => "and",
+                    OpCode::Eor => "eor",
+                    OpCode::Lsl => "lsl",
+                    OpCode::Lsr => "lsr",
+                    OpCode::Asr => "asr",
+                    OpCode::Adc => "adc",
+                    OpCode::Sbc => "sbc",
+                    OpCode::Ror => "ror",
+                    OpCode::Tst => "tst",
+                    OpCode::Neg => "neg",
+                    OpCode::Cmp => "cmp",
+                    OpCode::Cmn => "cmn",
+                    OpCode::Orr => "orr",
+                    OpCode::Mul => "mul",
+                    OpCode::Bic => "bic",
+                    OpCode::Mvn => "mvn",
+                }
+            )
+        }
+    }
+
+    #[bitfield(bits = 16)]
+    #[derive(Clone, Copy, Debug, Eq)]
+    pub struct Op {
+        pub dest_reg: RegisterName3Bit,
+        pub src_reg: RegisterName3Bit,
+        pub opcode: OpCode,
+        #[skip]
+        ignored: B6,
+    }
+
+    impl PartialEq for Op {
+        fn eq(&self, other: &Self) -> bool {
+            self.dest_reg() == other.dest_reg()
+                && self.src_reg() == other.src_reg()
+                && self.opcode() == other.opcode()
+        }
+    }
 }
 
-pub mod move_compare_add_sub_imm {
-    pub fn is_move_compare_add_sub_imm(opcode: u16) -> bool {
-        let move_compare_add_sub_imm_format: u16 = 0b1111_0000_0000_0000;
-        let format_mask: u16 = 0b1111_0000_0000_0000;
+pub mod move_comp_add_sub_imm {
+    use super::*;
+
+    pub fn is_move_comp_add_sub_imm(opcode: u16) -> bool {
+        let move_compare_add_sub_imm_format: u16 = 0b0010_0000_0000_0000;
+        let format_mask: u16 = 0b1110_0000_0000_0000;
         let extracted_format = opcode & format_mask;
         extracted_format == move_compare_add_sub_imm_format
+    }
+
+    pub fn parse(instr: u16) -> Op {
+        Op::from_bytes(instr.to_le_bytes())
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
+    #[bits = 2]
+    pub enum OpCode {
+        Mov,
+        Cmp,
+        Add,
+        Sub,
+    }
+
+    impl Display for OpCode {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(
+                f,
+                "{}s",
+                match self {
+                    OpCode::Mov => "mov",
+                    OpCode::Cmp => "cmp",
+                    OpCode::Add => "add",
+                    OpCode::Sub => "sub",
+                }
+            )
+        }
+    }
+
+    #[bitfield(bits = 16)]
+    #[derive(Clone, Copy, Eq, Debug, BitfieldSpecifier)]
+    pub struct Op {
+        pub imm8: u8,
+        pub dest_reg: RegisterName3Bit,
+        pub opcode: OpCode,
+        #[skip]
+        ignored: B3,
+    }
+
+    impl PartialEq for Op {
+        fn eq(&self, other: &Self) -> bool {
+            self.imm8() == other.imm8()
+                && self.dest_reg() == other.dest_reg()
+                && self.opcode() == other.opcode()
+        }
     }
 }
 
 pub mod add_sub {
+    use super::*;
+
     pub fn is_add_sub(opcode: u16) -> bool {
-        let add_sub_format: u16 = 0b1110_0000_0000_0000;
-        let format_mask: u16 = 0b1111_0000_0000_0000;
+        let add_sub_format: u16 = 0b0001_1000_0000_0000;
+        let format_mask: u16 = 0b1111_1000_0000_0000;
         let extracted_format = opcode & format_mask;
         extracted_format == add_sub_format
+    }
+
+    pub fn parse(instr: u16) -> Op {
+        Op::from_bytes(instr.to_le_bytes())
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
+    #[bits = 1]
+    pub enum OpCode {
+        Add,
+        Sub,
+    }
+
+    impl Display for OpCode {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(
+                f,
+                "{}s",
+                match self {
+                    OpCode::Add => "add",
+                    OpCode::Sub => "sub",
+                }
+            )
+        }
+    }
+
+    #[bitfield(bits = 16)]
+    #[derive(Clone, Copy, Eq, Debug, BitfieldSpecifier)]
+    pub struct Op {
+        pub dest_reg: RegisterName3Bit,
+        pub src_reg: RegisterName3Bit,
+        /// Either a [RegisterName3Bit] if `is_imm` == 0, or a 3-bit offset otherwise.
+        pub reg_or_imm3: B3,
+        pub opcode: OpCode,
+        pub is_imm: bool,
+        #[skip]
+        ignored: B5,
+    }
+
+    impl Op {
+        pub fn imm3(&self) -> u8 {
+            self.reg_or_imm3() as u8
+        }
+
+        pub fn offset_reg(&self) -> RegisterName3Bit {
+            self.reg_or_imm3().into()
+        }
+    }
+
+    impl PartialEq for Op {
+        fn eq(&self, other: &Self) -> bool {
+            self.dest_reg() == other.dest_reg()
+                && self.src_reg() == other.src_reg()
+                && self.reg_or_imm3() == other.reg_or_imm3()
+                && self.opcode() == other.opcode()
+                && self.is_imm() == other.is_imm()
+        }
     }
 }
 
@@ -1199,7 +1362,7 @@ mod tests {
 
     lazy_static! {
     // Instruction hex, assembly string, expected decoded instruction
-        static ref TEST_INSTRUCTIONS: [(u16, &'static str, ThumbInstruction); 30] = [
+        static ref TEST_INSTRUCTIONS: [(u16, &'static str, ThumbInstruction); 37] = [
           (
             0xdf08,
             "swi 8",
@@ -1449,7 +1612,7 @@ mod tests {
               .with_hi_op1(true)
               .with_dest_reg(R7)
               .with_hi_op2(false)
-              .with_source_reg(R5)
+              .with_src_reg(R5)
               .with_opcode(Add)
             )
           ),
@@ -1460,7 +1623,7 @@ mod tests {
               .with_hi_op1(false)
               .with_dest_reg(R4)
               .with_hi_op2(true)
-              .with_source_reg(R4)
+              .with_src_reg(R4)
               .with_opcode(Cmp)
             )
           ),
@@ -1469,7 +1632,7 @@ mod tests {
             "bx r11",
             ThumbInstruction::HiRegOpsBranchExchange(hi_reg_ops_branch_exchange::Op::new()
               .with_hi_op2(true)
-              .with_source_reg(R3)
+              .with_src_reg(R3)
               .with_opcode(Bx)
             )
           ),
@@ -1480,8 +1643,75 @@ mod tests {
               .with_hi_op1(true)
               .with_dest_reg(R7)
               .with_hi_op2(true)
-              .with_source_reg(R6)
+              .with_src_reg(R6)
               .with_opcode(Mov)
+            )
+          ),
+          (
+            0x4063,
+            "eors r3, r4",
+            ThumbInstruction::AluOps(alu_ops::Op::new()
+              .with_dest_reg(R3)
+              .with_src_reg(R4)
+              .with_opcode(alu_ops::OpCode::Eor)
+            )
+          ),
+          (
+            0x41a3,
+            "sbcs r3, r4",
+            ThumbInstruction::AluOps(alu_ops::Op::new()
+              .with_dest_reg(R3)
+              .with_src_reg(R4)
+              .with_opcode(alu_ops::OpCode::Sbc)
+            )
+          ),
+          (
+            0x4240,
+            "negs r0, r0",
+            ThumbInstruction::AluOps(alu_ops::Op::new()
+              .with_dest_reg(R0)
+              .with_src_reg(R0)
+              .with_opcode(alu_ops::OpCode::Neg)
+            )
+          ),
+          (
+            0x2080,
+            "movs r0, #128",
+            ThumbInstruction::MoveCompAddSubtractImm(move_comp_add_sub_imm::Op::new()
+              .with_opcode(move_comp_add_sub_imm::OpCode::Mov)
+              .with_dest_reg(R0)
+              .with_imm8(128)
+            )
+          ),
+          (
+            0x3e91,
+            "subs r6, #145",
+            ThumbInstruction::MoveCompAddSubtractImm(move_comp_add_sub_imm::Op::new()
+              .with_opcode(move_comp_add_sub_imm::OpCode::Sub)
+              .with_dest_reg(R6)
+              .with_imm8(145)
+            )
+          ),
+          (
+            0x1918,
+            "adds r0, r3, r4",
+            ThumbInstruction::AddSub(add_sub::Op::new()
+              .with_dest_reg(R0)
+              .with_src_reg(R3)
+              .with_is_imm(false)
+              .with_reg_or_imm3(R4.into())
+              .with_opcode(add_sub::OpCode::Add)
+            )
+          ),
+          (
+            0x1f96,
+            "subs r6, r2, #6",
+            ThumbInstruction::AddSub(add_sub::Op::new()
+              .with_dest_reg(R6)
+              .with_src_reg(R2)
+              .with_is_imm(true)
+              .with_reg_or_imm3(6)
+              .with_opcode(add_sub::OpCode::Sub)
             )
           )
         ];
