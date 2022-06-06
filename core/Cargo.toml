@@ -6,5 +6,5 @@ edition = "2021"
 
 [dependencies]
 modular-bitfield = "0.11.2"
-newtype_derive = "0.1.6"
 rangemap = "1.0.1"
+armv4t_decoder = { path = "../armv4t_decoder" }

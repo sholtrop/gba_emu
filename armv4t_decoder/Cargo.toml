@@ -1,5 +1,5 @@
 [package]
-name = "arm7tdmi_decoder"
+name = "armv4t_decoder"
 version = "0.1.0"
 edition = "2021"
 

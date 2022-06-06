@@ -5,7 +5,7 @@ use RegisterName::*;
 use Signedness::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Instruction {
+pub enum ArmInstruction {
     BranchAndExchange(branch_and_exchange::Op),
     BlockDataTransfer(block_data_transfer::Op),
     BranchAndBranchWithLink(branch_and_link::Op),
@@ -22,36 +22,10 @@ pub enum Instruction {
     DataProcessing(data_processing::Op), // ALU instructions
 }
 
-use Instruction::*;
+use ArmInstruction::*;
 
-impl Instruction {
+impl ArmInstruction {
     pub fn decode(instr: u32) -> Self {
-        //x if Decoder::is_branch_and_branch_exchange(instr) {
-        //     OpFormat::BranchAndBranchExchange
-        //x } else if Decoder::is_block_data_transfer(instr) {
-        //     OpFormat::BlockDataTransfer
-        //x } else if Decoder::is_branch_and_branch_with_link(instr) {
-        //     OpFormat::BranchAndBranchWithLink
-        //x } else if Decoder::is_software_interrupt(instr) {
-        //     OpFormat::SoftwareInterrupt
-        //x } else if Decoder::is_undefined(instr) {
-        //     OpFormat::Undefined
-        //x } else if Decoder::is_single_data_transfer(instr) {
-        //     OpFormat::SingleDataTransfer
-        // x} else if Decoder::is_single_data_swap(instr) {
-        //     OpFormat::SingleDataSwap
-        // x} else if Decoder::is_halfword_data_transfer_register(instr) {
-        //     OpFormat::HalfwordDataTransferRegister
-        // x} else if Decoder::is_halfword_data_transfer_immediate(instr) {
-        //     OpFormat::HalfwordDataTransferImmediate
-        // x} else if Decoder::is_multiply(instr) {
-        //     OpFormat::Multiply
-        // x} else if Decoder::is_psr_transfer_mrs(instr) {
-        //     OpFormat::PsrTransferMrs
-        //x } else if Decoder::is_psr_transfer_msr(instr) {
-        //     OpFormat::PsrTransferMsr
-        // x} else if Decoder::is_data_processing(instr) {
-
         if branch_and_exchange::is_branch_and_exchange(instr) {
             BranchAndExchange(branch_and_exchange::parse(instr))
         } else if block_data_transfer::is_block_data_transfer(instr) {
@@ -335,7 +309,7 @@ impl Instruction {
     }
 }
 
-impl Display for Instruction {
+impl Display for ArmInstruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Certain instructions can add an extra letter to the mnemonic.
         // E.g. MUL can become MULEQS with condition code EQ and set_condition=true
@@ -1405,15 +1379,6 @@ pub mod halfword_data_transfer {
     }
 }
 
-// pub mod halfword_data_imm {
-//     pub fn is_halfword_data_transfer_imm(instr: u32) -> bool {
-//         let halfword_data_transfer_immediate_format = 0b0000_0000_0100_0000_0000_0000_1001_0000;
-//         let format_mask = 0b0000_1110_0100_0000_0000_0000_1001_0000;
-//         let extracted_format = instr & format_mask;
-//         extracted_format == halfword_data_transfer_immediate_format
-//     }
-// }
-
 #[cfg(test)]
 mod tests {
     use super::halfword_data_transfer::ShType::*;
@@ -1429,11 +1394,11 @@ mod tests {
 
     lazy_static! {
     // Instruction hex, assembly string, expected decoded instruction
-    static ref TEST_INSTRUCTIONS: [(u32, &'static str, Instruction); 36] = [
+    static ref TEST_INSTRUCTIONS: [(u32, &'static str, ArmInstruction); 36] = [
         (
             0xe2833001,
             "add r3, r3, #1",
-            Instruction::DataProcessing(
+            ArmInstruction::DataProcessing(
                 data_processing::Op::new()
                     .with_condition(Al)
                     .with_op(Add)
@@ -1446,7 +1411,7 @@ mod tests {
         (
             0xe0823003,
             "add r3, r2, r3",
-            Instruction::DataProcessing(data_processing::Op::new()
+            ArmInstruction::DataProcessing(data_processing::Op::new()
                 .with_condition(Al)
                 .with_op(Add)
                 .with_dest_reg(R3)
@@ -1457,7 +1422,7 @@ mod tests {
         (
             0xe24dd01c,
             "sub r13, r13, #28",
-            Instruction::DataProcessing(data_processing::Op::new()
+            ArmInstruction::DataProcessing(data_processing::Op::new()
                 .with_condition(Al)
                 .with_op(Sub)
                 .with_dest_reg(R13)
@@ -1469,7 +1434,7 @@ mod tests {
         (
             0xe3a09a01,
             "mov r9, #4096",
-            Instruction::DataProcessing(data_processing::Op::new()
+            ArmInstruction::DataProcessing(data_processing::Op::new()
                 .with_condition(Al)
                 .with_op(Mov)
                 .with_dest_reg(R9)
@@ -1480,7 +1445,7 @@ mod tests {
         (
             0xe2a5400a,
             "adc r4, r5, #10",
-            Instruction::DataProcessing(data_processing::Op::new()
+            ArmInstruction::DataProcessing(data_processing::Op::new()
                 .with_condition(Al)
                 .with_op(Adc)
                 .with_dest_reg(R4)
@@ -1492,7 +1457,7 @@ mod tests {
         (
             0xe0076008,
             "and r6, r7, r8",
-            Instruction::DataProcessing(data_processing::Op::new()
+            ArmInstruction::DataProcessing(data_processing::Op::new()
                 .with_condition(Al)
                 .with_op(And)
                 .with_dest_reg(R6)
@@ -1504,7 +1469,7 @@ mod tests {
         (
             0xeafffffe,
             "b 0",
-            Instruction::BranchAndBranchWithLink(branch_and_link::Op::new()
+            ArmInstruction::BranchAndBranchWithLink(branch_and_link::Op::new()
                 .with_condition(Al)
                 .offset_set(0xfffffe)
             )
@@ -1512,7 +1477,7 @@ mod tests {
         (
             0xebfffffe,
             "bl 0",
-            Instruction::BranchAndBranchWithLink(branch_and_link::Op::new()
+            ArmInstruction::BranchAndBranchWithLink(branch_and_link::Op::new()
                 .with_condition(Al)
                 .with_link(true)
                 .offset_set(0xfffffe)
@@ -1522,7 +1487,7 @@ mod tests {
         (
             0xe3c920aa,
             "bic r2, r9, #170",
-            Instruction::DataProcessing(data_processing::Op::new()
+            ArmInstruction::DataProcessing(data_processing::Op::new()
                 .with_condition(Al)
                 .with_op(Bic)
                 .with_operand1(R9)
@@ -1534,7 +1499,7 @@ mod tests {
         (
             0x112fff12,
             "bxne r2",
-            Instruction::BranchAndExchange(branch_and_exchange::Op::new()
+            ArmInstruction::BranchAndExchange(branch_and_exchange::Op::new()
                 .with_condition(Ne)
                 .with_rn(R2)
             )
@@ -1542,7 +1507,7 @@ mod tests {
         (
             0x03720010,
             "cmneq r2, #16",
-            Instruction::DataProcessing(data_processing::Op::new()
+            ArmInstruction::DataProcessing(data_processing::Op::new()
                 .with_condition(Eq)
                 .with_set_cond(true)
                 .with_op(Cmn)
@@ -1554,7 +1519,7 @@ mod tests {
         (
             0x93540000,
             "cmpls r4, #0",
-            Instruction::DataProcessing(data_processing::Op::new()
+            ArmInstruction::DataProcessing(data_processing::Op::new()
                 .with_condition(Ls)
                 .with_op(Cmp)
                 .with_operand1(R4)
@@ -1566,7 +1531,7 @@ mod tests {
         (
             0x42221012,
             "eormi r1, r2, #18",
-            Instruction::DataProcessing(data_processing::Op::new()
+            ArmInstruction::DataProcessing(data_processing::Op::new()
                 .with_condition(Mi)
                 .with_op(Eor)
                 .with_dest_reg(R1)
@@ -1578,7 +1543,7 @@ mod tests {
         (
             0x08417c00,
             "stmdaeq r1, {r10, r11, r12, r13, r14}^",
-            Instruction::BlockDataTransfer(block_data_transfer::Op::new()
+            ArmInstruction::BlockDataTransfer(block_data_transfer::Op::new()
                 .with_condition(Eq)
                 .with_load_store(Store)
                 .with_base_reg(R1)
@@ -1591,7 +1556,7 @@ mod tests {
         (
             0xe9100002,
             "ldmdb r0, {r1}",
-            Instruction::BlockDataTransfer(block_data_transfer::Op::new()
+            ArmInstruction::BlockDataTransfer(block_data_transfer::Op::new()
                 .with_condition(Al)
                 .with_load_store(Load)
                 .with_base_reg(R0)
@@ -1603,7 +1568,7 @@ mod tests {
         (
             0xc9f0fffe,
             "ldmibgt r0!, {r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15}^",
-            Instruction::BlockDataTransfer(block_data_transfer::Op::new()
+            ArmInstruction::BlockDataTransfer(block_data_transfer::Op::new()
                 .with_condition(Gt)
                 .with_load_store(Load)
                 .with_base_reg(R0)
@@ -1617,7 +1582,7 @@ mod tests {
         (
             0xe80800aa,
             "stmda r8, {r1, r3, r5, r7}",
-            Instruction::BlockDataTransfer(block_data_transfer::Op::new()
+            ArmInstruction::BlockDataTransfer(block_data_transfer::Op::new()
                 .with_condition(Al)
                 .with_load_store(Store)
                 .with_base_reg(R8)
@@ -1629,7 +1594,7 @@ mod tests {
         (
             0x00314392,
             "mlaseq r1, r2, r3, r4",
-            Instruction::Multiply(multiply::Op::new()
+            ArmInstruction::Multiply(multiply::Op::new()
                 .with_condition(Eq)
                 .with_accumulate(MultiplyAndAccumulate)
                 .with_reg_dest(R1)
@@ -1642,7 +1607,7 @@ mod tests {
         (
             0xe3100001,
             "tst r0, #1",
-            Instruction::DataProcessing(data_processing::Op::new()
+            ArmInstruction::DataProcessing(data_processing::Op::new()
                 .with_condition(Al)
                 .with_op(Tst)
                 .with_operand1(R0)
@@ -1654,7 +1619,7 @@ mod tests {
         (
             0xe3300b01,
             "teq r0, #1024",
-            Instruction::DataProcessing(data_processing::Op::new()
+            ArmInstruction::DataProcessing(data_processing::Op::new()
                 .with_condition(Al)
                 .with_op(Teq)
                 .with_operand1(R0)
@@ -1666,7 +1631,7 @@ mod tests {
         (
             0x1f000000,
             "swine 0x0",
-            Instruction::SoftwareInterrupt(software_interrupt::Op::new()
+            ArmInstruction::SoftwareInterrupt(software_interrupt::Op::new()
                 .with_condition(Ne)
                 .with_comment(0x0)
             )
@@ -1674,7 +1639,7 @@ mod tests {
         (
             0xe0010392,
             "mul r1, r2, r3",
-            Instruction::Multiply(multiply::Op::new()
+            ArmInstruction::Multiply(multiply::Op::new()
                 .with_condition(Al)
                 .with_accumulate(MultiplyOnly)
                 .with_reg_dest(R1)
@@ -1686,7 +1651,7 @@ mod tests {
         (
             0x01f0c10b,
             "mvnseq r12, r11, lsl #2",
-            Instruction::DataProcessing(data_processing::Op::new()
+            ArmInstruction::DataProcessing(data_processing::Op::new()
                 .with_condition(Eq)
                 .with_op(Mvn)
                 .with_dest_reg(R12)
@@ -1703,7 +1668,7 @@ mod tests {
         (
             0x53811001,
             "orrpl r1, r1, #1",
-            Instruction::DataProcessing(data_processing::Op::new()
+            ArmInstruction::DataProcessing(data_processing::Op::new()
                 .with_condition(Pl)
                 .with_op(Orr)
                 .with_dest_reg(R1)
@@ -1716,7 +1681,7 @@ mod tests {
         (
             0xe2754000,
             "rsbs r4, r5, #0",
-            Instruction::DataProcessing(data_processing::Op::new()
+            ArmInstruction::DataProcessing(data_processing::Op::new()
                 .with_condition(Al)
                 .with_op(Rsb)
                 .with_dest_reg(R4)
@@ -1729,7 +1694,7 @@ mod tests {
         (
             0xe0e21233,
             "rsc r1, r2, r3, lsr r2",
-            Instruction::DataProcessing(data_processing::Op::new()
+            ArmInstruction::DataProcessing(data_processing::Op::new()
                 .with_condition(Al)
                 .with_op(Rsc)
                 .with_dest_reg(R1)
@@ -1747,7 +1712,7 @@ mod tests {
         (
             0x10d33003,
             "sbcsne r3, r3, r3",
-            Instruction::DataProcessing(data_processing::Op::new()
+            ArmInstruction::DataProcessing(data_processing::Op::new()
                 .with_condition(Ne)
                 .with_op(Sbc)
                 .with_dest_reg(R3)
@@ -1762,7 +1727,7 @@ mod tests {
         (
             0x46610102,
             "strbtmi r0, [r1],-r2, lsl #2",
-            Instruction::SingleDataTransfer(single_data_transfer::Op::new()
+            ArmInstruction::SingleDataTransfer(single_data_transfer::Op::new()
                 .with_condition(Mi)
                 .with_load_store(Store)
                 .with_up_or_down(Down)
@@ -1783,7 +1748,7 @@ mod tests {
         (
             0xe1442093,
             "swpb r2, r3, [r4]",
-            Instruction::SingleDataSwap(single_data_swap::Op::new()
+            ArmInstruction::SingleDataSwap(single_data_swap::Op::new()
                 .with_condition(Al)
                 .with_byte_or_word(ByteOrWord::Byte)
                 .with_dest_reg(R2)
@@ -1794,7 +1759,7 @@ mod tests {
         (
             0xe0841392,
             "umull r1, r4, r2, r3",
-            Instruction::MultiplyLong(multiply_long::Op::new()
+            ArmInstruction::MultiplyLong(multiply_long::Op::new()
                 .with_condition(Al)
                 .with_accumulate(MultiplyOnly)
                 .with_reg_dest_lo(R1)
@@ -1808,7 +1773,7 @@ mod tests {
         (
             0xe0f51392,
             "smlals r1, r5, r2, r3",
-            Instruction::MultiplyLong(multiply_long::Op::new()
+            ArmInstruction::MultiplyLong(multiply_long::Op::new()
                 .with_condition(Al)
                 .with_accumulate(MultiplyAndAccumulate)
                 .with_reg_dest_lo(R1)
@@ -1822,7 +1787,7 @@ mod tests {
         (
             0xe1d210b0,
             "ldrh r1, [r2]",
-            Instruction::HalfwordDataTransfer(halfword_data_transfer::Op::new()
+            ArmInstruction::HalfwordDataTransfer(halfword_data_transfer::Op::new()
                 .with_condition(Al)
                 .with_load_store(Load)
                 .with_up_or_down(Up)
@@ -1838,7 +1803,7 @@ mod tests {
         (
             0xe10230b4,
             "strh r3, [r2, -r4]",
-            Instruction::HalfwordDataTransfer(halfword_data_transfer::Op::new()
+            ArmInstruction::HalfwordDataTransfer(halfword_data_transfer::Op::new()
                 .with_condition(Al)
                 .with_load_store(Store)
                 .with_up_or_down(Down)
@@ -1854,7 +1819,7 @@ mod tests {
         (
             0x814f1000,
             "mrshi r1, SPSR",
-            Instruction::PsrTransferMrs(psr_transfer_mrs::Op::new()
+            ArmInstruction::PsrTransferMrs(psr_transfer_mrs::Op::new()
                 .with_condition(Hi)
                 .with_reg_dest(R1)
                 .with_src_psr(PsrLocation::Spsr)
@@ -1863,7 +1828,7 @@ mod tests {
         (
             0xe128f001,
             "msr CPSR, r1",
-            Instruction::PsrTransferMsrImm(psr_transfer_msr::OpImm::new()
+            ArmInstruction::PsrTransferMsrImm(psr_transfer_msr::OpImm::new()
                 .with_condition(Al)
                 .with_dest_psr(PsrLocation::Cpsr)
                 .with_is_imm_operand(false)
@@ -1873,7 +1838,7 @@ mod tests {
         (
             0xe368f201,
             "msr SPSR, #268435456",
-            Instruction::PsrTransferMsrImm(psr_transfer_msr::OpImm::new()
+            ArmInstruction::PsrTransferMsrImm(psr_transfer_msr::OpImm::new()
                 .with_condition(Al)
                 .with_dest_psr(PsrLocation::Spsr)
                 .with_is_imm_operand(true)
@@ -1907,7 +1872,7 @@ mod tests {
     #[test]
     fn decode_instructions_test() {
         for (instr, _, expect_decoded) in TEST_INSTRUCTIONS.into_iter() {
-            let actual_decoded = Instruction::decode(instr);
+            let actual_decoded = ArmInstruction::decode(instr);
             assert_eq!(
                 expect_decoded, actual_decoded,
                 "\nEXPECTED:\n{:#?}\n\nACTUAL:\n{:#?}",
@@ -1919,7 +1884,7 @@ mod tests {
     #[test]
     fn stringify_instructions_test() {
         for (instr, expected_str, _) in TEST_INSTRUCTIONS.into_iter() {
-            let actual_str = Instruction::decode(instr).to_string();
+            let actual_str = ArmInstruction::decode(instr).to_string();
             assert_eq!(
                 expected_str, actual_str,
                 "\nEXPECTED:\n{:#?}\n\nACTUAL:\n{:#?}",

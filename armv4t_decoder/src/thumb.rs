@@ -973,8 +973,6 @@ pub mod load_store_reg_offset {
 }
 
 pub mod load_store_sign_ext_byte_halfword {
-    use crate::common::Signedness;
-
     use super::*;
 
     pub fn is_load_store_sign_ext_byte_halfword(opcode: u16) -> bool {
