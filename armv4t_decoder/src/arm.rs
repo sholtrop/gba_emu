@@ -1010,24 +1010,33 @@ pub mod block_data_transfer {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct RegisterList(u16);
 
+    impl RegisterList {
+        pub fn to_vec(self) -> Vec<RegisterName> {
+            self.0
+                .view_bits()
+                .iter()
+                .enumerate()
+                .filter_map(
+                    |(reg, reg_bit): (usize, bitvec::ptr::BitRef<'_, _, _, Lsb0>)| {
+                        if *reg_bit {
+                            Some(RegisterName::from(reg as u8))
+                        } else {
+                            None
+                        }
+                    },
+                )
+                .collect()
+        }
+    }
+
     impl Display for RegisterList {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(
                 f,
                 "{{{}}}",
-                self.0
-                    .view_bits()
-                    .iter()
-                    .enumerate()
-                    .filter_map(
-                        |(reg, reg_bit): (usize, bitvec::ptr::BitRef<'_, _, _, Lsb0>)| {
-                            if *reg_bit {
-                                Some(RegisterName::from(reg as u8).to_string())
-                            } else {
-                                None
-                            }
-                        }
-                    )
+                self.to_vec()
+                    .into_iter()
+                    .map(|r| r.to_string())
                     .collect::<Vec<String>>()
                     .join(", ")
             )

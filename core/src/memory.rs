@@ -1,3 +1,5 @@
+use std::ops::{Add, AddAssign};
+
 use crate::cartridge::Cartridge;
 
 const KB: usize = 1024;
@@ -26,6 +28,23 @@ const OAM_END: usize = 0x700_03FF;
 const PAK_ROM_START: usize = 0x800_0000;
 
 const CART_RAM_START: usize = 0xE00_0000;
+
+#[derive(Clone, Copy, Debug)]
+pub struct CycleCost(pub u8);
+
+impl Add for CycleCost {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self(self.0 + rhs.0)
+    }
+}
+
+impl AddAssign for CycleCost {
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 += rhs.0;
+    }
+}
 
 #[derive(Debug)]
 pub struct EmulatorMemory {
@@ -65,6 +84,10 @@ pub struct EmulatorMemory {
     // Where save data is stored. Variable size, about 64kb.
     // 0xE00_000 ~ var
     cartridge: Cartridge,
+
+    /// Address of the last performed mem read/write
+    /// Used to determine whether current access is sequential (S) or non-sequential (N)
+    last_access_addr: u32,
 }
 
 impl EmulatorMemory {
@@ -79,12 +102,13 @@ impl EmulatorMemory {
             oam: [0; KB],
             pak_rom: vec![],
             cartridge: Cartridge::new(),
+            last_access_addr: 0x0,
         }
     }
 
-    pub fn read(&self, address: u32, read_size: MemReadSize) -> MemRead {
-        let address = address as usize;
-        let amount = read_size as usize;
+    pub fn read(&self, read: &MemRead) -> (u32, CycleCost) {
+        let address = read.address as usize;
+        let amount = read.size as usize;
         let (offset, src): (usize, &[u8]) = match address {
             SYSTEM_ROM_START..=SYSTEM_ROM_END => (0, &self.system_rom),
             EW_RAM_START..=EW_RAM_END => (EW_RAM_START, &self.ew_ram),
@@ -98,30 +122,41 @@ impl EmulatorMemory {
         };
         let range = (address - offset)..(address - offset + amount);
         let bytes = &src[range];
-        match read_size {
-            MemReadSize::Byte => MemRead::Byte(bytes[0]),
-            MemReadSize::Halfword => {
+        let cost = CycleCost(1);
+        match read.size {
+            MemSize::Byte => (bytes[0] as u32, cost),
+            MemSize::Halfword => {
                 let arr: [u8; 2] = bytes.try_into().unwrap();
-                MemRead::Halfword(u16::from_le_bytes(arr))
+                (u16::from_le_bytes(arr) as u32, cost)
             }
-            MemReadSize::Word => {
+            MemSize::Word => {
                 let arr: [u8; 4] = bytes.try_into().unwrap();
-                MemRead::Word(u32::from_le_bytes(arr))
+                (u32::from_le_bytes(arr), cost)
             }
         }
+    }
+
+    pub fn write(&mut self, write: &MemWrite) -> CycleCost {
+        CycleCost(1)
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum MemReadSize {
+pub enum MemSize {
     Byte = 1,
     Halfword = 2,
     Word = 4,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum MemRead {
-    Byte(u8),
-    Halfword(u16),
-    Word(u32),
+pub struct MemWrite {
+    pub address: u32,
+    pub value: u32,
+    pub size: MemSize,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct MemRead {
+    pub address: u32,
+    pub size: MemSize,
 }
