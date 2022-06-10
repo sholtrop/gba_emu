@@ -860,6 +860,8 @@ pub mod multiply_long {
 }
 
 pub mod branch_and_exchange {
+    use crate::common::InstructionMode;
+
     use super::*;
 
     pub fn is_branch_and_exchange(instr: u32) -> bool {
@@ -888,14 +890,9 @@ pub mod branch_and_exchange {
         }
     }
 
-    pub enum CpuMode {
-        Arm,
-        Thumb,
-    }
-
     impl Op {
-        pub fn switch_mode_to(&self) -> CpuMode {
-            use CpuMode::*;
+        pub fn switch_mode_to(&self) -> InstructionMode {
+            use InstructionMode::*;
             if u8::from(self.rn()) & 1 == 1 {
                 Thumb
             } else {

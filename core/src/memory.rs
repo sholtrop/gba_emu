@@ -1,5 +1,7 @@
 use std::ops::{Add, AddAssign};
 
+use bitvec::macros::internal::funty::Numeric;
+
 use crate::cartridge::Cartridge;
 
 const KB: usize = 1024;
@@ -29,6 +31,10 @@ const PAK_ROM_START: usize = 0x800_0000;
 
 const CART_RAM_START: usize = 0xE00_0000;
 
+pub const BYTE: usize = 1;
+pub const HALFWORD: usize = 2;
+pub const WORD: usize = 4;
+
 #[derive(Clone, Copy, Debug)]
 pub struct CycleCost(pub u8);
 
@@ -47,7 +53,7 @@ impl AddAssign for CycleCost {
 }
 
 #[derive(Debug)]
-pub struct EmulatorMemory {
+pub struct GbaMemory {
     // BIOS memory
     // 0x00 ~ 0x3FFF
     system_rom: [u8; 16 * KB],
@@ -90,7 +96,7 @@ pub struct EmulatorMemory {
     last_access_addr: u32,
 }
 
-impl EmulatorMemory {
+impl GbaMemory {
     pub fn new() -> Self {
         Self {
             system_rom: [0; 16 * KB],
@@ -106,9 +112,8 @@ impl EmulatorMemory {
         }
     }
 
-    pub fn read(&self, read: &MemRead) -> (u32, CycleCost) {
-        let address = read.address as usize;
-        let amount = read.size as usize;
+    pub fn read<const SIZE: usize>(&self, address: u32) -> ([u8; SIZE], CycleCost) {
+        let address = address as usize;
         let (offset, src): (usize, &[u8]) = match address {
             SYSTEM_ROM_START..=SYSTEM_ROM_END => (0, &self.system_rom),
             EW_RAM_START..=EW_RAM_END => (EW_RAM_START, &self.ew_ram),
@@ -120,24 +125,43 @@ impl EmulatorMemory {
             PAK_ROM_START..=CART_RAM_START => (PAK_ROM_START, &self.pak_rom),
             _ => (CART_RAM_START, self.cartridge.ram()),
         };
-        let range = (address - offset)..(address - offset + amount);
-        let bytes = &src[range];
+        let range = (address - offset)..(address - offset + SIZE);
+        let bytes: [u8; SIZE] = src[range].try_into().unwrap();
+        // TODO: Actual cost
         let cost = CycleCost(1);
-        match read.size {
-            MemSize::Byte => (bytes[0] as u32, cost),
-            MemSize::Halfword => {
-                let arr: [u8; 2] = bytes.try_into().unwrap();
-                (u16::from_le_bytes(arr) as u32, cost)
-            }
-            MemSize::Word => {
-                let arr: [u8; 4] = bytes.try_into().unwrap();
-                (u32::from_le_bytes(arr), cost)
-            }
-        }
+
+        (bytes, cost)
     }
 
-    pub fn write(&mut self, write: &MemWrite) -> CycleCost {
+    pub fn read_byte(&self, address: u32) -> (u8, CycleCost) {
+        let (val, cycles) = self.read::<BYTE>(address);
+        (val[0], cycles)
+    }
+
+    pub fn read_le_halfword(&self, address: u32) -> (u16, CycleCost) {
+        let (val, cycles) = self.read::<HALFWORD>(address);
+        (u16::from_le_bytes(val), cycles)
+    }
+
+    pub fn read_le_word(&self, address: u32) -> (u32, CycleCost) {
+        let (val, cycles) = self.read::<WORD>(address);
+        (u32::from_le_bytes(val), cycles)
+    }
+
+    pub fn write<const SIZE: usize>(&mut self, address: u32, value: [u8; SIZE]) -> CycleCost {
         CycleCost(1)
+    }
+
+    pub fn write_byte(&mut self, address: u32, value: u8) -> CycleCost {
+        self.write::<BYTE>(address, value.to_le_bytes())
+    }
+
+    pub fn write_le_halfword(&mut self, address: u32, value: u16) -> CycleCost {
+        self.write::<HALFWORD>(address, value.to_le_bytes())
+    }
+
+    pub fn write_le_word(&mut self, address: u32, value: u32) -> CycleCost {
+        self.write::<WORD>(address, value.to_le_bytes())
     }
 }
 
@@ -148,7 +172,7 @@ pub enum MemSize {
     Word = 4,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct MemWrite {
     pub address: u32,
     pub value: u32,

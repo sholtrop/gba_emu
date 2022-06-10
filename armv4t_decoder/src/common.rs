@@ -100,3 +100,9 @@ impl Display for ByteOrWord {
         )
     }
 }
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, BitfieldSpecifier)]
+pub enum InstructionMode {
+    Arm,
+    Thumb,
+}

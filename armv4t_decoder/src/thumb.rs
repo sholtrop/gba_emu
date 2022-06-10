@@ -8,8 +8,8 @@ use crate::{
     thumb::load_address::LoadSource,
 };
 
-pub const THUMB_INSTR_SIZE_BITS: u8 = 16;
-pub const THUMB_INSTR_SIZE_BYTES: u8 = THUMB_INSTR_SIZE_BITS / 8;
+pub const THUMB_INSTR_SIZE_BITS: usize = 16;
+pub const THUMB_INSTR_SIZE_BYTES: usize = THUMB_INSTR_SIZE_BITS / 8;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operands {
