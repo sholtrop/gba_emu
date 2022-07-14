@@ -14,16 +14,6 @@ pub mod psr {
     pub const DEFAULT_STACKPOINTER_IRQ: u32 = 0x03007FA0;
     pub const DEFAULT_STACKPOINTER_SUPERVISOR: u32 = 0x03007FE0;
 
-    // #[derive(Debug, BitfieldSpecifier)]
-    // #[bits = 1]
-    // pub enum InstructionMode {
-    //     /// 16-bit special subset of instructions that map to 32-bit counterparts
-    //     Thumb,
-
-    //     /// 32-bit ARM instruction set
-    //     Arm,
-    // }
-
     #[derive(BitfieldSpecifier, Debug)]
     #[bits = 5]
     pub enum ProcessorMode {
@@ -154,9 +144,11 @@ const ABT_OFFSET: usize = 13;
 const UND_OFFSET: usize = 13;
 
 impl CpuRegisters {
-    pub fn new() -> Self {
+    pub fn new(pc: u32) -> Self {
         let mut regs = [Register(0); 16];
         regs[STACK_POINTER] = DEFAULT_STACKPOINTER_USER.into();
+        regs[PROGRAM_COUNTER] = (pc as u32).into();
+
         let [cpsr, spsr_irq, spsr_fiq, spsr_svc, spsr_abt, spsr_und] =
             [ProgramStatusRegister::default(); 6];
 
@@ -191,8 +183,24 @@ impl CpuRegisters {
         self.regs[idx].0
     }
 
+    pub fn get_cpsr_mut(&mut self) -> &mut ProgramStatusRegister {
+        &mut self.cpsr
+    }
+
+    pub fn get_cpsr(&self) -> &ProgramStatusRegister {
+        &self.cpsr
+    }
+
     pub fn read_cpsr(&self) -> ProgramStatusRegister {
         self.cpsr
+    }
+
+    pub fn get_spsr_mut(&mut self) -> &mut ProgramStatusRegister {
+        self.current_spsr_mut()
+    }
+
+    pub fn get_spsr(&self) -> &ProgramStatusRegister {
+        self.current_spsr()
     }
 
     pub fn write(&mut self, reg: RegisterName, value: u32) {
@@ -210,7 +218,7 @@ impl CpuRegisters {
     }
 
     pub fn read_spsr(&self) -> ProgramStatusRegister {
-        self.current_spsr()
+        *self.current_spsr()
     }
 
     pub fn get_instr_mode(&self) -> InstructionMode {
@@ -238,15 +246,15 @@ impl CpuRegisters {
         }
     }
 
-    fn current_spsr(&self) -> ProgramStatusRegister {
+    fn current_spsr(&self) -> &ProgramStatusRegister {
         match self.cpsr.processor_mode() {
-            ProcessorMode::Supervisor => self.spsr_svc,
-            ProcessorMode::Fiq => self.spsr_fiq,
-            ProcessorMode::Irq => self.spsr_irq,
-            ProcessorMode::Abort => self.spsr_abt,
-            ProcessorMode::Undefined => self.spsr_und,
+            ProcessorMode::Supervisor => &self.spsr_svc,
+            ProcessorMode::Fiq => &self.spsr_fiq,
+            ProcessorMode::Irq => &self.spsr_irq,
+            ProcessorMode::Abort => &self.spsr_abt,
+            ProcessorMode::Undefined => &self.spsr_und,
             ProcessorMode::System | ProcessorMode::User => {
-                unreachable!("No spsr for system or user mode")
+                unreachable!("No spsr for System or User mode")
             }
         }
     }

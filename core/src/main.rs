@@ -7,23 +7,22 @@ mod instruction;
 mod memory;
 mod registers;
 
-use std::{cell::RefCell, rc::Rc};
-
-use armv4t_decoder::decode_arm;
 use cartridge::Cartridge;
+use cpu::Cpu;
+use memory::GbaMemory;
 
-use crate::{cpu::Cpu, memory::GbaMemory};
+use crate::memory::CART_ROM_START;
+
+const CARTRIDGE_FILENAME: &str = "gba-tests/arm/arm.gba";
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    let cartridge_filename = &args[1];
+    let cartridge_filename = CARTRIDGE_FILENAME;
     let cartridge = Cartridge::new().read_file(cartridge_filename);
+
     println!("{}", cartridge.game_title());
-    println!("{}", decode_arm(cartridge.first_instr()));
-
-    let memory = Rc::new(RefCell::new(GbaMemory::new()));
-
-    let mut cpu = Cpu::new(memory);
+    let memory = GbaMemory::new();
+    memory.borrow_mut().insert_cartridge(cartridge);
+    let mut cpu = Cpu::new(memory, CART_ROM_START as u32);
 
     loop {
         cpu.tick();

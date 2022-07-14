@@ -1,11 +1,13 @@
+use crate::memory::WORD;
 use crate::registers::psr::ProcessorMode::{self, *};
 use crate::{
-    alu::Alu,
+    alu::{Alu, AluSetCpsr},
     instruction::Armv4tInstruction,
-    memory::{CycleCost, GbaMemory, BYTE, HALFWORD, WORD},
+    memory::{CycleCost, GbaMemory},
     registers::CpuRegisters,
 };
 
+use armv4t_decoder::arm::halfword_data_transfer::ShType;
 use armv4t_decoder::{arm::*, common::*, thumb::ThumbInstruction};
 use std::{cell::RefCell, rc::Rc};
 
@@ -17,7 +19,6 @@ pub const PROGRAM_COUNTER: RegisterName = RegisterName::R15;
 /// Value the PC is set to when entering supervisor mode via a SWI
 pub const SUPERVISOR_PC: u32 = 0x08;
 
-#[derive(Debug)]
 pub struct Cpu {
     registers: CpuRegisters,
     memory: Rc<RefCell<GbaMemory>>,
@@ -25,9 +26,9 @@ pub struct Cpu {
 }
 
 impl Cpu {
-    pub fn new(memory: Rc<RefCell<GbaMemory>>) -> Self {
+    pub fn new(memory: Rc<RefCell<GbaMemory>>, pc: u32) -> Self {
         Self {
-            registers: CpuRegisters::new(),
+            registers: CpuRegisters::new(pc),
             memory,
             cycle_count: 0,
         }
@@ -75,7 +76,7 @@ impl Cpu {
         self.cycle_count += cycles.0 as u32;
     }
 
-    /// Add `offset` to the program counter. Returns the value of the old program counter, before the offset has been added.
+    /// Add `offset` to the program counter. Returns the value of the old program counter, before the offset was added.
     fn pc_add_offset(&mut self, offset: i32) -> u32 {
         let pc = self.registers.read(PROGRAM_COUNTER);
         if offset < 0 {
@@ -89,6 +90,7 @@ impl Cpu {
 
     fn exec_arm(&mut self, instr: ArmInstruction) -> CycleCost {
         use armv4t_decoder::arm::ArmInstruction::*;
+        dbg!(instr.to_string());
         let cond = instr.condition();
         if !self.arm_cond_satisfied(cond) {
             return CycleCost(1);
@@ -101,12 +103,12 @@ impl Cpu {
             Undefined(op) => self.arm_undefined_op(op),
             SingleDataTransfer(op) => self.arm_single_data_transfer(op),
             SingleDataSwap(op) => self.arm_single_data_swap(op),
-            HalfwordDataTransfer(op) => CycleCost(1),
-            Multiply(op) => CycleCost(1),
-            MultiplyLong(op) => CycleCost(1),
-            PsrTransferMrs(op) => CycleCost(1),
-            PsrTransferMsr(op) => CycleCost(1),
-            PsrTransferMsrImm(op) => CycleCost(1),
+            HalfwordDataTransfer(op) => self.arm_halfword_data_transfer(op),
+            Multiply(op) => self.arm_multiply(op),
+            MultiplyLong(op) => self.arm_multiply_long(op),
+            PsrTransferMrs(op) => self.arm_psr_transfer_mrs(op),
+            PsrTransferMsr(op) => self.arm_psr_transfer_msr(op),
+            PsrTransferMsrImm(op) => self.arm_psr_transfer_imm(op),
             DataProcessing(op) => self.arm_data_processing(op),
         }
     }
@@ -225,7 +227,11 @@ impl Cpu {
 
     fn arm_branch_with_link(&mut self, op: branch_and_link::Op) -> CycleCost {
         use RegisterName::*;
-        let offset = op.offset_get();
+        // `offset` will be encoded with -8 (two instructions behind)
+        // but since we don't implement pipelining, CPU will only be one instruction ahead.
+        // Correct this by adding one instruction (= 4) to the branch offset.
+        const INSTR_SIZE: i32 = WORD as i32;
+        let offset = op.offset_get() + INSTR_SIZE;
         let old_pc = self.pc_add_offset(offset);
         if op.link() {
             // Link-reg contains address following the BL instruction
@@ -271,7 +277,13 @@ impl Cpu {
                 offset_reg.shift_amt()
             };
             let sh_type = offset_reg.shift_type();
-            Alu::shift(offset_amount, sh_type, shift_amount)
+            let cpsr = self.registers.get_cpsr_mut();
+            Alu::exec_shift(
+                offset_amount,
+                sh_type,
+                shift_amount,
+                AluSetCpsr::Alter(cpsr),
+            )
         } else {
             op.offset().as_imm() as u32
         };
@@ -341,14 +353,254 @@ impl Cpu {
     }
 
     fn arm_data_processing(&mut self, op: data_processing::Op) -> CycleCost {
-        // TODO for register specified shift amounts: If this byte is zero, the unchanged contents of Rm will be used as the second operand,
-        // and the old value of the CPSR C flag will be passed on as the shifter carry output.
+        let opcode = op.op();
+        let lhs = self.registers.read(op.operand1());
+        let rhs = if op.is_imm_operand() {
+            op.operand2().as_rot_imm().value()
+        } else {
+            let sh_reg = op.operand2().as_shift_reg();
+            self.read_shift_reg(sh_reg)
+        };
 
-        // When Rd is R15 and the S flag is set the result of the operation is placed in R15 and
-        // the SPSR corresponding to the current mode is moved to the CPSR. This allows state
-        // changes which atomically restore both PC and CPSR. This form of instruction should
-        // not be used in User mode
+        let result = if op.set_cond() {
+            let cpsr = self.registers.get_cpsr_mut();
+            Alu::exec_op(opcode, lhs, rhs, AluSetCpsr::Alter(cpsr))
+        } else {
+            let cpsr = self.registers.get_cpsr();
+            Alu::exec_op(opcode, lhs, rhs, AluSetCpsr::Preserve(cpsr))
+        };
 
-        CycleCost(0)
+        if result.write_back {
+            let dest = op.dest_reg();
+
+            // When Rd is R15 and the S flag is set the result of the operation is placed in R15 and
+            // the SPSR corresponding to the current mode is moved to the CPSR. This allows state
+            // changes which atomically restore both PC and CPSR. This form of instruction should
+            // not be used in User mode.
+            if dest == RegisterName::R15 {
+                let spsr = self.registers.read_spsr();
+                self.registers.write_cpsr(spsr);
+            }
+            self.registers.write(dest, result.value);
+        }
+
+        // TODO: Cycles should be
+        // Normal: 1S
+        // Reg shift: 1S + 1I
+        // PC written: 2S + 1N
+        // Reg shift + PC written: 2S + 1n + 1I
+        CycleCost(12)
+    }
+
+    fn arm_psr_transfer_msr(&mut self, op: psr_transfer_msr::Op) -> CycleCost {
+        let val = self.registers.read(op.rm()) >> 28;
+        let dest = match op.dest_psr() {
+            PsrLocation::Cpsr => self.registers.get_cpsr_mut(),
+            PsrLocation::Spsr => self.registers.get_spsr_mut(),
+        };
+
+        let (new_neg, new_zero, new_carry, new_overflow) = (
+            val >> 3 & 1 == 1,
+            val >> 2 & 1 == 1,
+            val >> 1 & 1 == 1,
+            val & 1 == 1,
+        );
+
+        dest.set_neg_condition(new_neg);
+        dest.set_zero_condition(new_zero);
+        dest.set_cbe_condition(new_carry);
+        dest.set_overflow_condition(new_overflow);
+
+        // TODO: Cycles should be 1S
+        CycleCost(6)
+    }
+
+    fn arm_psr_transfer_mrs(&mut self, op: psr_transfer_mrs::Op) -> CycleCost {
+        let src = match op.src_psr() {
+            PsrLocation::Cpsr => self.registers.read_cpsr().into_bytes(),
+            PsrLocation::Spsr => self.registers.read_spsr().into_bytes(),
+        };
+        let dst = op.reg_dest();
+        // Bytes are BE
+        self.registers.write(dst, u32::from_be_bytes(src));
+        // TODO: Cycles should be 1S
+        CycleCost(6)
+    }
+
+    fn arm_psr_transfer_imm(&mut self, op: psr_transfer_msr::OpImm) -> CycleCost {
+        let val = if op.is_imm_operand() {
+            op.src_operand().as_rot_imm().value()
+        } else {
+            let reg = op.src_operand().as_reg();
+            self.registers.read(reg)
+        } >> 28;
+        let dest = match op.dest_psr() {
+            PsrLocation::Cpsr => self.registers.get_cpsr_mut(),
+            PsrLocation::Spsr => self.registers.get_spsr_mut(),
+        };
+
+        let (new_neg, new_zero, new_carry, new_overflow) = (
+            val >> 3 & 1 == 1,
+            val >> 2 & 1 == 1,
+            val >> 1 & 1 == 1,
+            val & 1 == 1,
+        );
+
+        dest.set_neg_condition(new_neg);
+        dest.set_zero_condition(new_zero);
+        dest.set_cbe_condition(new_carry);
+        dest.set_overflow_condition(new_overflow);
+
+        // TODO: Cycles should be 1S
+        CycleCost(6)
+    }
+
+    fn arm_multiply(&mut self, op: multiply::Op) -> CycleCost {
+        use AccumulateType::*;
+        let lhs = self.registers.read(op.rs());
+        let rhs = self.registers.read(op.rm());
+        let acc = if op.accumulate() == MultiplyAndAccumulate {
+            self.registers.read(op.rn())
+        } else {
+            0
+        };
+        let cpsr = if op.set_cond() {
+            AluSetCpsr::Alter(self.registers.get_cpsr_mut())
+        } else {
+            AluSetCpsr::Preserve(self.registers.get_cpsr())
+        };
+
+        let result = Alu::exec_mul(lhs, rhs, acc, cpsr);
+        let dst = op.reg_dest();
+        self.registers.write(dst, result);
+
+        // TODO: Cycles should be MUL: 1S + mI and MLA: 1S + (m+1)I
+        // where m is:
+        // 1 if bits [32:8] of the multiplier operand are all zero or all one.
+        // 2 if bits [32:16] of the multiplier operand are all zero or all one.
+        // 3 if bits [32:24] of the multiplier operand are all zero or all one.
+        // 4 in all other cases.
+        // Do we want to be this precise though?
+        CycleCost(20)
+    }
+
+    fn arm_multiply_long(&mut self, op: multiply_long::Op) -> CycleCost {
+        use AccumulateType::*;
+        let lhs = self.registers.read(op.rs());
+        let rhs = self.registers.read(op.rm());
+        let dst_lo = op.reg_dest_lo();
+        let dst_hi = op.reg_dest_hi();
+
+        let acc = if op.accumulate() == MultiplyAndAccumulate {
+            let hi = self.registers.read(dst_lo) as u64;
+            let lo = self.registers.read(dst_hi) as u64;
+            (hi << 32) | lo
+        } else {
+            0
+        } as u64;
+        let sign = op.signedness();
+
+        let cpsr = if op.set_cond() {
+            AluSetCpsr::Alter(self.registers.get_cpsr_mut())
+        } else {
+            AluSetCpsr::Preserve(self.registers.get_cpsr())
+        };
+
+        let (res_hi, res_lo) = Alu::exec_mul_long(lhs, rhs, acc, cpsr, sign);
+
+        self.registers.write(dst_hi, res_hi);
+        self.registers.write(dst_lo, res_lo);
+
+        // TODO: Cycles should be MULL: 1S + (m+1)I, and MLAL: 1S + (m+2)I
+        // where `m` depends on how many bits are zero (look at docs)
+        // Do we want to be this precise though?
+        CycleCost(20)
+    }
+
+    fn arm_halfword_data_transfer(&mut self, op: halfword_data_transfer::Op) -> CycleCost {
+        use LoadOrStore::*;
+        use PreOrPostIndexing::*;
+        use ShType::*;
+        use UpOrDown::*;
+
+        let mut offset = if op.is_imm_offset() {
+            op.imm_offset() as i32
+        } else {
+            self.registers.read(op.reg_offset()) as i32
+        };
+
+        let mut addr = self.registers.read(op.base_reg()) as i32;
+
+        if op.up_or_down() == Down {
+            offset = -offset;
+        }
+        if op.pre_post_indexing() == Pre {
+            addr += offset;
+        }
+        let mut addr = addr as u32;
+
+        let cycles = match (op.load_store(), op.sh_type()) {
+            (Store, _) => {
+                let value = self.registers.read(op.reg_dest()) as u16;
+                self.memory.borrow_mut().write_le_halfword(addr, value)
+            }
+            (Load, SignedByte) => {
+                let (val, cycles) = self.memory.borrow().read_byte(addr);
+                let val = val as i8 as i32;
+                self.registers.write(op.reg_dest(), val as u32);
+                cycles
+            }
+            (Load, SignedHalfwords) => {
+                let (val, cycles) = self.memory.borrow().read_le_halfword(addr);
+                let val = val as i16 as i32;
+                self.registers.write(op.reg_dest(), val as u32);
+                cycles
+            }
+            (Load, UnsignedHalfwords) => {
+                let (val, cycles) = self.memory.borrow().read_le_halfword(addr);
+                self.registers.write(op.reg_dest(), val as u32);
+                cycles
+            }
+            _ => unreachable!(),
+        };
+        if op.pre_post_indexing() == Post {
+            addr += offset as u32;
+        }
+
+        if op.write_back() {
+            self.registers.write(op.base_reg(), addr);
+        }
+
+        // TODO: Cycles should be
+        // Normal LDR: 1S + 1N + 1I
+        // LDR PC: 2S + 2N + 1I
+        // STRH: 2N
+        cycles
+    }
+
+    fn read_shift_reg(&mut self, sh_reg: ShiftRegister) -> u32 {
+        // TODO LSL #0 is a special case, where the shifter carry out is the old value of the CPSR C
+        // flag. The contents of Rm are used directly as the second operand
+        let offset_amount = self.registers.read(sh_reg.reg());
+        let shift_amount = if sh_reg.shift_amt_in_reg() {
+            // TODO
+            // Only the least significant byte of the contents of Rs is used to determine the shift
+            // amount. Rs can be any general register other than R15.
+            // If this byte is zero, the unchanged contents of Rm will be used as the second operand,
+            // and the old value of the CPSR C flag will be passed on as the shifter carry output.
+
+            let sh_amt_reg = sh_reg.shift_reg();
+            self.registers.read(sh_amt_reg) as u8
+        } else {
+            sh_reg.shift_amt()
+        };
+        let sh_type = sh_reg.shift_type();
+        let cpsr = self.registers.get_cpsr_mut();
+        Alu::exec_shift(
+            offset_amount,
+            sh_type,
+            shift_amount,
+            AluSetCpsr::Alter(cpsr),
+        )
     }
 }

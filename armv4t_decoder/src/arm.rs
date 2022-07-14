@@ -94,7 +94,9 @@ impl ArmInstruction {
                 (rn, None, None, None)
             }
             BranchAndBranchWithLink(op) => {
-                let offset = Some(op.offset_get().to_string());
+                // Add 8 to match the original offset. Assembler will encode it -8 because
+                // the CPU will always be two instructions ahead.
+                let offset = Some((op.offset_get() + 8).to_string());
                 (offset, None, None, None)
             }
             SoftwareInterrupt(op) => {
@@ -187,8 +189,6 @@ impl ArmInstruction {
                         let offset = op.imm_offset();
                         if base_reg == R15 {
                             format!("#{}", offset)
-                        } else if offset == 0 {
-                            format!("[{}]", base_reg)
                         } else {
                             format!("[{}, {}]{}", base_reg, offset, wb)
                         }
@@ -278,7 +278,6 @@ impl ArmInstruction {
             },
             Undefined(_) => "undefined".into(),
             SingleDataSwap(_) => "swp".into(),
-            // HalfwordDataTransfer(_) => todo!(),
             HalfwordDataTransfer(op) => match (op.load_store(), op.sh_type()) {
                 (Load, UnsignedHalfwords) => "ldrh".into(),
                 (Load, SignedHalfwords) => "ldrsh".into(),
@@ -372,7 +371,7 @@ impl Display for ArmInstruction {
                     op, extra_letter, condition, dest, op1, op2, op3
                 )
             }
-            _ => unreachable!("A previous Operand was `None`"),
+            _ => unreachable!("Invalid combination of operands"),
         }
     }
 }
@@ -623,6 +622,7 @@ pub struct RotatedImmediate {
 }
 
 impl RotatedImmediate {
+    /// The calculated value of this immediate, after applying the rotation.
     pub fn value(&self) -> u32 {
         let value = self.val() as u32;
         value.rotate_right(self.rotation() as u32 * 2)
@@ -942,17 +942,16 @@ pub mod branch_and_link {
         }
 
         /// Compute the 32-bit 2's complement sign-extended integer
-        /// from the stored 24 bits, add 8 because the CPU will be 2 instructions ahead,
-        /// and then return it.
+        /// from the stored 24 bits. Does NOT subtract 2 instructions (= 8 bytes).
         pub fn offset_get(&self) -> i32 {
             let n = self.offset();
             let signed = ((n >> 23) & 1) == 1;
             let shifted = (n << 2) as i32;
 
             if signed {
-                (shifted | (0b111111 << 26)) + 8
+                shifted | (0b111111 << 26)
             } else {
-                shifted as i32 + 8
+                shifted as i32
             }
         }
     }
@@ -1400,7 +1399,7 @@ mod tests {
 
     lazy_static! {
     // Instruction hex, assembly string, expected decoded instruction
-    static ref TEST_INSTRUCTIONS: [(u32, &'static str, ArmInstruction); 36] = [
+    static ref TEST_INSTRUCTIONS: [(u32, &'static str, ArmInstruction); 37] = [
         (
             0xe2833001,
             "add r3, r3, #1",
@@ -1792,7 +1791,7 @@ mod tests {
         ),
         (
             0xe1d210b0,
-            "ldrh r1, [r2]",
+            "ldrh r1, [r2, 0]",
             ArmInstruction::HalfwordDataTransfer(halfword_data_transfer::Op::new()
                 .with_condition(Al)
                 .with_load_store(Load)
@@ -1849,6 +1848,15 @@ mod tests {
                 .with_dest_psr(PsrLocation::Spsr)
                 .with_is_imm_operand(true)
                 .with_src_operand(RotatedImmediate::new_imm(1, 2).into())
+            )
+        ),
+        (
+            0xEA00002E,
+            "b 192",
+            ArmInstruction::BranchAndBranchWithLink(branch_and_link::Op::new()
+                .with_condition(Al)
+                .with_link(false)
+                .offset_set(0x2E)
             )
         )
     ];

@@ -19,7 +19,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["0xE1c100b0"],
+            "args": ["core/test_programs/arm/plus_compare/program.bin"],
             "cwd": "${workspaceFolder}"
         },
         {
@@ -35,6 +35,62 @@
                 ],
                 "filter": {
                     "name": "core",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'armv4t_decoder'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=armv4t_decoder"
+                ],
+                "filter": {
+                    "name": "armv4t_decoder",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'armv4t_decoder'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=armv4t_decoder",
+                    "--package=armv4t_decoder"
+                ],
+                "filter": {
+                    "name": "armv4t_decoder",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'armv4t_decoder'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=armv4t_decoder",
+                    "--package=armv4t_decoder"
+                ],
+                "filter": {
+                    "name": "armv4t_decoder",
                     "kind": "bin"
                 }
             },
@@ -72,63 +128,6 @@
                 ],
                 "filter": {
                     "name": "render",
-                    "kind": "bin"
-                }
-            },
-            "args": [],
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug unit tests in library 'armv4t_decoder'",
-            "cargo": {
-                "args": [
-                    "test",
-                    "--no-run",
-                    "--lib",
-                    "--package=armv4t_decoder",
-                    "decode_instructions_test"
-                ],
-                "filter": {
-                    "name": "armv4t_decoder",
-                    "kind": "lib"
-                }
-            },
-            "args": ["0xE1c100b0"],
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug executable 'armv4t_decoder'",
-            "cargo": {
-                "args": [
-                    "build",
-                    "--bin=armv4t_decoder",
-                    "--package=armv4t_decoder"
-                ],
-                "filter": {
-                    "name": "armv4t_decoder",
-                    "kind": "bin"
-                }
-            },
-            "args": ["0xE1c100b0"],
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug unit tests in executable 'armv4t_decoder'",
-            "cargo": {
-                "args": [
-                    "test",
-                    "--no-run",
-                    "--bin=armv4t_decoder",
-                    "--package=armv4t_decoder"
-                ],
-                "filter": {
-                    "name": "armv4t_decoder",
                     "kind": "bin"
                 }
             },

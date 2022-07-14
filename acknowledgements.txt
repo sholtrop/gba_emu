@@ -1,0 +1,1 @@
+suite.gba is from https://github.com/mgba-emu/suite

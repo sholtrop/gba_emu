@@ -20,15 +20,19 @@ impl Cartridge {
     }
 
     pub fn game_title(&self) -> String {
-        let bytes = self.read_bytes(0x0A0, 12);
-        let index = bytes.iter().position(|&b| b == 0);
+        let bytes = self.read_bytes(0xA0, 12);
+        let nullbyte_index = bytes.iter().position(|&b| b == 0);
         // Read until possible nullbyte
-        let bytes = if let Some(index) = index {
+        let bytes = if let Some(index) = nullbyte_index {
             &bytes[0..index]
         } else {
             bytes
         };
-        String::from_utf8(bytes.to_vec()).unwrap()
+        if let Ok(title) = String::from_utf8(bytes.to_vec()) {
+            title
+        } else {
+            "ERROR READING GAME TITLE".to_string()
+        }
     }
 
     pub fn header(&self) -> &[u8] {
@@ -40,8 +44,12 @@ impl Cartridge {
         u32::from_le_bytes(arr)
     }
 
-    pub fn ram(&self) -> &[u8] {
+    pub fn mem(&self) -> &[u8] {
         &self.blob
+    }
+
+    pub fn mem_mut(&mut self) -> &mut [u8] {
+        &mut self.blob
     }
 
     fn read_bytes(&self, start: usize, amount: usize) -> &[u8] {
