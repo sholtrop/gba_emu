@@ -167,11 +167,24 @@ impl GbaMemory {
         let bytes: [u8; SIZE] = src[range].try_into().unwrap();
         // TODO: Actual cost
         let cost = CycleCost(1);
-
+        if SIZE == 4 {
+            println!(
+                "Read {:#X} from {:#X}",
+                u32::from_le_bytes(bytes[0..4].try_into().unwrap()),
+                address
+            );
+        }
         (bytes, cost)
     }
 
     fn write<const SIZE: usize>(&mut self, address: u32, value: &[u8; SIZE]) -> CycleCost {
+        if SIZE == 4 {
+            println!(
+                "Write {:#X} to {:#X}",
+                u32::from_le_bytes(value[0..4].try_into().unwrap()),
+                address
+            );
+        }
         let (src, mut addr): (&mut [u8], usize) = match self.get_mem_region(address) {
             (MemoryRegion::System, addr) => (&mut *self.system_rom, addr),
             (MemoryRegion::EwRam, addr) => (&mut *self.ew_ram, addr),

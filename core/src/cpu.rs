@@ -235,7 +235,7 @@ impl Cpu {
         let old_pc = self.pc_add_offset(offset);
         if op.link() {
             // Link-reg contains address following the BL instruction
-            self.registers.write(R14, old_pc + 4);
+            self.registers.write(R14, old_pc);
         }
         // TODO: make 2S + 1N
         CycleCost(12)
@@ -602,5 +602,17 @@ impl Cpu {
             shift_amount,
             AluSetCpsr::Alter(cpsr),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_ldm_stm() {
+        // TODO: Test something like:
+        // stmfd   sp!, {r0-r1, pc}
+        // ldmfd   sp!, {r0-r1, pc}
+        // Which should restore everything
+        // Decrement addressing seems to be completely wrong (page 84 of datasheet)
     }
 }

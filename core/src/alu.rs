@@ -287,11 +287,11 @@ impl Alu {
     }
 }
 
-// #[cfg(test)]
+#[cfg(test)]
 mod tests {
     use registers::psr::ProgramStatusRegister;
 
-    use crate::registers::{self, CpuRegisters};
+    use crate::registers::{self};
 
     use super::*;
 
@@ -388,18 +388,6 @@ mod tests {
             );
         }
     }
-
-    /* TODO: Unit tests for shifts:
-        1 LSL by 32 has result zero, carry out equal to bit 0 of Rm.
-        2 LSL by more than 32 has result zero, carry out zero.
-        3 LSR by 32 has result zero, carry out equal to bit 31 of Rm.
-        4 LSR by more than 32 has result zero, carry out zero.
-        5 ASR by 32 or more has result filled with and carry out equal to bit 31 of Rm.
-        6 ROR by 32 has result equal to Rm, carry out equal to bit 31 of Rm.
-        7 ROR by n where n is greater than 32 will give the same result and carry out
-        as ROR by n-32; therefore repeatedly subtract 32 from n until the amount is
-        in the range 1 to 32 and see above.
-    */
 
     #[test]
     // LSL by 32 has result zero, carry out equal to bit 0 of Rm.
