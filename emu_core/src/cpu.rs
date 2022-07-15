@@ -15,6 +15,8 @@ pub const CYCLES_PER_SECOND: usize = 1 << 24;
 pub const FRAMES_PER_SECOND: usize = 60;
 pub const CYCLES_PER_FRAME: usize = CYCLES_PER_SECOND / FRAMES_PER_SECOND;
 
+pub const STACK_POINTER: RegisterName = RegisterName::R13;
+pub const LINK_REGISTER: RegisterName = RegisterName::R14;
 pub const PROGRAM_COUNTER: RegisterName = RegisterName::R15;
 /// Value the PC is set to when entering supervisor mode via a SWI
 pub const SUPERVISOR_PC: u32 = 0x08;
@@ -184,29 +186,32 @@ impl Cpu {
         };
         let base_reg = op.base_reg();
         let base_addr = self.registers.read(base_reg) as i32;
-        let address = base_addr
-            + match op.pre_post_indexing() {
-                Pre => offset,
-                Post => 0,
-            };
-        let mut address = address as u32;
+        let mut reg_list = op.reg_list().to_vec();
+        let mut address = match op.pre_post_indexing() {
+            Pre => base_addr + offset,
+            Post => base_addr,
+        } as i32;
+
+        let reg_iter = match op.up_or_down() {
+            Up => reg_list.into_iter(),
+            Down => {
+                reg_list.reverse();
+                reg_list.into_iter()
+            }
+        };
 
         let mut mem = self.memory.borrow_mut();
         let mut cycle_cost = CycleCost(0);
-        for reg in op.reg_list().to_vec() {
+        for reg in reg_iter {
             cycle_cost += match op.load_store() {
-                Store => mem.write_le_word(address, self.registers.read(reg)),
+                Store => mem.write_le_word(address as u32, self.registers.read(reg)),
                 Load => {
-                    let (val, cycles) = mem.read_le_word(address);
+                    let (val, cycles) = mem.read_le_word(address as u32);
                     self.registers.write(reg, val);
                     cycles
                 }
             };
-            if offset < 0 {
-                address -= offset.abs() as u32;
-            } else {
-                address += offset as u32;
-            }
+            address += offset;
         }
         if op.psr_force_user() {
             todo!("S-bit should do something special")
@@ -214,9 +219,9 @@ impl Cpu {
         if op.write_back() {
             let wb_addr = match op.pre_post_indexing() {
                 Post => address,
-                Pre => ((address as i32) - offset) as u32,
+                Pre => address - offset,
             };
-            self.registers.write(base_reg, wb_addr);
+            self.registers.write(base_reg, wb_addr as u32);
         }
         // TODO: Make nS + 1N + 1I for LDM
         // (n+1)S + 2N + 1I for LDM PC
@@ -607,8 +612,96 @@ impl Cpu {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::{
+        cartridge::Cartridge, memory::CART_ROM_START, registers::psr::DEFAULT_STACKPOINTER_USER,
+    };
+    use byteorder::{LittleEndian, WriteBytesExt};
+    use RegisterName::*;
+
+    fn vecu32_to_vecu8(vec32: Vec<u32>) -> Vec<u8> {
+        let mut vec8: Vec<u8> = vec![];
+        for i in vec32 {
+            vec8.write_u32::<LittleEndian>(i).unwrap();
+        }
+        vec8
+    }
+
+    fn setup_cpu(start_memory: Vec<u8>) -> Cpu {
+        let memory = GbaMemory::new();
+        memory
+            .borrow_mut()
+            .insert_cartridge(Cartridge::new_with_contents(start_memory));
+        Cpu::new(memory, CART_ROM_START as u32)
+    }
+
+    /// `expected_mem` is a vector of (address, value)
+    fn assert_memory_state_eq(mem: &Rc<RefCell<GbaMemory>>, expected_mem: Vec<(u32, u32)>) {
+        let mem = mem.borrow();
+        for (addr, expected_val) in expected_mem {
+            let (actual_val, _) = mem.read_le_word(addr);
+            assert_eq!(
+                actual_val, expected_val,
+                "\n{:#X} - Expected {} ({:#X}), but actual was {} ({:#X})",
+                addr, expected_val, expected_val, actual_val, actual_val
+            );
+        }
+    }
+
+    fn assert_cpu_state_eq(cpu: &Cpu, expected_regs: Vec<(RegisterName, u32)>) {
+        for (reg, expected_val) in expected_regs {
+            let actual_val = cpu.registers.read(reg);
+            assert_eq!(
+                actual_val, expected_val,
+                "\n{} - Expected {} ({:#X}), but actual was {} ({:#X})",
+                reg, expected_val, expected_val, actual_val, actual_val
+            );
+        }
+    }
+
     #[test]
     fn test_ldm_stm() {
+        let mut cpu = setup_cpu(vecu32_to_vecu8(vec![
+            0xe3a00001, // mov r0, #1
+            0xe3a01002, // mov r1, #2
+            0xe92d8003, // stmfd sp!, {r0-r1, pc}
+            0xe8bd8003, // ldmfd sp!, {r0-r1, pc}
+        ]));
+
+        // mov r0, #1
+        cpu.tick();
+        assert_cpu_state_eq(&cpu, vec![(R0, 1)]);
+
+        // mov r1, #2
+        cpu.tick();
+        assert_cpu_state_eq(&cpu, vec![(R1, 2)]);
+
+        // stmfd sp!, {r0-r1, pc}
+        cpu.tick();
+        let pc = cpu.registers.read(PROGRAM_COUNTER);
+        assert_memory_state_eq(
+            &cpu.memory,
+            vec![
+                (DEFAULT_STACKPOINTER_USER - 4, pc),
+                (DEFAULT_STACKPOINTER_USER - 8, 2),
+                (DEFAULT_STACKPOINTER_USER - 12, 1),
+            ],
+        );
+        assert_cpu_state_eq(&cpu, vec![(STACK_POINTER, DEFAULT_STACKPOINTER_USER - 12)]);
+
+        // ldmfd sp!, {r0-r1, pc}
+        cpu.tick();
+        let pc = cpu.registers.read(PROGRAM_COUNTER);
+        assert_memory_state_eq(
+            &cpu.memory,
+            vec![
+                (DEFAULT_STACKPOINTER_USER - 4, pc),
+                (DEFAULT_STACKPOINTER_USER - 8, 2),
+                (DEFAULT_STACKPOINTER_USER - 12, 1),
+            ],
+        );
+        assert_cpu_state_eq(&cpu, vec![(STACK_POINTER, DEFAULT_STACKPOINTER_USER)]);
+
         // TODO: Test something like:
         // stmfd   sp!, {r0-r1, pc}
         // ldmfd   sp!, {r0-r1, pc}

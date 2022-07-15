@@ -1,5 +1,5 @@
 [package]
-name = "core"
+name = "emu_core"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,4 +8,5 @@ edition = "2021"
 modular-bitfield = "0.11.2"
 rangemap = "1.0.1"
 bitvec = "1.0.0"
+byteorder = "1.4.3"
 armv4t_decoder = { path = "../armv4t_decoder" }
