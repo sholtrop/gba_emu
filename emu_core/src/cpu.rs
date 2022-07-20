@@ -3,7 +3,7 @@ use crate::registers::psr::ProcessorMode::{self, *};
 use crate::{
     alu::{Alu, AluSetCpsr},
     instruction::Armv4tInstruction,
-    memory::{CycleCost, GbaMemory},
+    memory::{Cycles, GbaMemory},
     registers::CpuRegisters,
 };
 
@@ -11,35 +11,73 @@ use armv4t_decoder::arm::halfword_data_transfer::ShType;
 use armv4t_decoder::{arm::*, common::*, thumb::ThumbInstruction};
 use std::{cell::RefCell, rc::Rc};
 
-pub const CYCLES_PER_SECOND: usize = 1 << 24;
-pub const FRAMES_PER_SECOND: usize = 60;
-pub const CYCLES_PER_FRAME: usize = CYCLES_PER_SECOND / FRAMES_PER_SECOND;
-
 pub const STACK_POINTER: RegisterName = RegisterName::R13;
 pub const LINK_REGISTER: RegisterName = RegisterName::R14;
 pub const PROGRAM_COUNTER: RegisterName = RegisterName::R15;
 /// Value the PC is set to when entering supervisor mode via a SWI
 pub const SUPERVISOR_PC: u32 = 0x08;
 
+pub enum HardwareInterrupt {
+    Vblank = 1,
+    Hblank = 1 << 1,
+    VcounterMatch = 1 << 2,
+    Timer0Overflow = 1 << 3,
+    Timer1Overflow = 1 << 4,
+    Timer2Overflow = 1 << 5,
+    Timer3Overflow = 1 << 6,
+    SerialComm = 1 << 7,
+    Dma0 = 1 << 8,
+    Dma1 = 1 << 9,
+    Dma2 = 1 << 10,
+    Dma3 = 1 << 11,
+    Keypad = 1 << 12,
+    GamePak = 1 << 13,
+}
+
 pub struct Cpu {
     registers: CpuRegisters,
     memory: Rc<RefCell<GbaMemory>>,
-    cycle_count: u32,
+    current_tick_cycles: Cycles,
 }
 
 impl Cpu {
+    pub const CYCLES_PER_SECOND: usize = 1 << 24;
+    pub const FRAMES_PER_SECOND: usize = 60;
+
     pub fn new(memory: Rc<RefCell<GbaMemory>>, pc: u32) -> Self {
         Self {
             registers: CpuRegisters::new(pc),
             memory,
-            cycle_count: 0,
+            current_tick_cycles: Cycles(0),
         }
     }
 
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self) -> Cycles {
+        self.current_tick_cycles = Cycles(0);
         let instr = self.fetch();
         let op = self.decode(instr);
         self.execute(op);
+        self.current_tick_cycles
+    }
+
+    pub fn handle_interrupt(&mut self, interrupt: HardwareInterrupt) -> Cycles {
+        // TODO: Check REG_IME (if != 1, interrupts are ignored)
+        // TODO: Check REG_IE for specific bit of this interrupt
+        // TODO: Set REG_IF for currently handled interrupt
+
+        // TODO: Switch to IRQ mode and execute the following BIOS code:
+        /*
+            00000018  b      128h                ;IRQ vector: jump to actual BIOS handler
+            00000128  stmfd  r13!,r0-r3,r12,r14  ;save registers to SP_irq
+            0000012C  mov    r0,4000000h         ;ptr+4 to 03FFFFFC (mirror of 03007FFC)
+            00000130  add    r14,r15,0h          ;retadr for USER handler $+8=138h
+            00000134  ldr    r15,[r0,-4h]        ;jump to [03FFFFFC] USER handler
+            00000138  ldmfd  r13!,r0-r3,r12,r14  ;restore registers from SP_irq
+            0000013C  subs   r15,r14,4h          ;return from IRQ (PC=LR-4, CPSR=SPSR)
+        */
+
+        // TODO: More accurate cycle cost
+        Cycles(0)
     }
 
     fn fetch(&mut self) -> u32 {
@@ -58,7 +96,7 @@ impl Cpu {
             }
         };
         self.pc_add_offset(pc_offset);
-        self.cycle_count += cycles.0 as u32;
+        self.current_tick_cycles += cycles;
         instr
     }
 
@@ -75,7 +113,7 @@ impl Cpu {
             Armv4tInstruction::Arm(op) => self.exec_arm(op),
             Armv4tInstruction::Thumb(op) => self.exec_thumb(op),
         };
-        self.cycle_count += cycles.0 as u32;
+        self.current_tick_cycles += cycles;
     }
 
     /// Add `offset` to the program counter. Returns the value of the old program counter, before the offset was added.
@@ -90,12 +128,13 @@ impl Cpu {
         pc
     }
 
-    fn exec_arm(&mut self, instr: ArmInstruction) -> CycleCost {
+    fn exec_arm(&mut self, instr: ArmInstruction) -> Cycles {
         use armv4t_decoder::arm::ArmInstruction::*;
-        dbg!(instr.to_string());
+        log::debug!("{}", instr);
         let cond = instr.condition();
         if !self.arm_cond_satisfied(cond) {
-            return CycleCost(1);
+            log::debug!("Instruction skipped - condition not satisfied");
+            return Cycles(1);
         }
         match instr {
             BranchAndExchange(op) => self.arm_branch_and_exchange(op),
@@ -137,7 +176,7 @@ impl Cpu {
         }
     }
 
-    fn exec_thumb(&mut self, instr: ThumbInstruction) -> CycleCost {
+    fn exec_thumb(&mut self, instr: ThumbInstruction) -> Cycles {
         use armv4t_decoder::thumb::ThumbInstruction::*;
         match instr {
             AddOffsetToStackPointer(op) => {}
@@ -160,10 +199,10 @@ impl Cpu {
             MoveCompAddSubtractImm(op) => {}
             AddSub(op) => {}
         }
-        CycleCost(1)
+        Cycles(1)
     }
 
-    fn arm_branch_and_exchange(&mut self, op: branch_and_exchange::Op) -> CycleCost {
+    fn arm_branch_and_exchange(&mut self, op: branch_and_exchange::Op) -> Cycles {
         let val = self.registers.read(op.rn());
         let switch_to_thumb = val & 1 == 1;
         self.registers.write(PROGRAM_COUNTER, val);
@@ -172,10 +211,10 @@ impl Cpu {
         }
         // TODO: Make cycle cost more accurate by looking at what memory region we would refill the pipeline from,
         // had this been a real GBA. Should take 2S + 1N cycles.
-        CycleCost(12)
+        Cycles(12)
     }
 
-    fn arm_block_data_transfer(&mut self, op: block_data_transfer::Op) -> CycleCost {
+    fn arm_block_data_transfer(&mut self, op: block_data_transfer::Op) -> Cycles {
         use LoadOrStore::*;
         use PreOrPostIndexing::*;
         use UpOrDown::*;
@@ -201,7 +240,7 @@ impl Cpu {
         };
 
         let mut mem = self.memory.borrow_mut();
-        let mut cycle_cost = CycleCost(0);
+        let mut cycle_cost = Cycles(0);
         for reg in reg_iter {
             cycle_cost += match op.load_store() {
                 Store => mem.write_le_word(address as u32, self.registers.read(reg)),
@@ -230,7 +269,7 @@ impl Cpu {
         cycle_cost
     }
 
-    fn arm_branch_with_link(&mut self, op: branch_and_link::Op) -> CycleCost {
+    fn arm_branch_with_link(&mut self, op: branch_and_link::Op) -> Cycles {
         use RegisterName::*;
         // `offset` will be encoded with -8 (two instructions behind)
         // but since we don't implement pipelining, CPU will only be one instruction ahead.
@@ -243,10 +282,10 @@ impl Cpu {
             self.registers.write(R14, old_pc);
         }
         // TODO: make 2S + 1N
-        CycleCost(12)
+        Cycles(12)
     }
 
-    fn arm_software_interrupt(&mut self, op: software_interrupt::Op) -> CycleCost {
+    fn arm_software_interrupt(&mut self, op: software_interrupt::Op) -> Cycles {
         let old_cpsr = self.registers.read_cpsr();
         self.registers.switch_cpu_mode(Supervisor);
         self.registers.write(PROGRAM_COUNTER, SUPERVISOR_PC);
@@ -254,23 +293,23 @@ impl Cpu {
         let bios_op = op.comment();
         todo!("Call relevant BIOS function");
         // TODO: Make 2S + 1N
-        CycleCost(12)
+        Cycles(12)
     }
 
-    fn arm_undefined_op(&mut self, op: undefined_instr::Op) -> CycleCost {
+    fn arm_undefined_op(&mut self, op: undefined_instr::Op) -> Cycles {
         self.registers.switch_cpu_mode(ProcessorMode::Undefined);
         // TODO: Set PC to und exception vector address
         // TODO: Make 2S + 1I + 1N
-        CycleCost(12)
+        Cycles(12)
     }
 
-    fn arm_single_data_transfer(&mut self, op: single_data_transfer::Op) -> CycleCost {
+    fn arm_single_data_transfer(&mut self, op: single_data_transfer::Op) -> Cycles {
         use ByteOrWord::*;
         use LoadOrStore::*;
         use PreOrPostIndexing::*;
         use UpOrDown::*;
 
-        let mut total_cycle_cost = CycleCost(1);
+        let mut total_cycle_cost = Cycles(1);
 
         let offset = if op.is_reg_offset() {
             let offset_reg = op.offset().as_shift_reg();
@@ -335,7 +374,7 @@ impl Cpu {
         total_cycle_cost
     }
 
-    fn arm_single_data_swap(&mut self, op: single_data_swap::Op) -> CycleCost {
+    fn arm_single_data_swap(&mut self, op: single_data_swap::Op) -> Cycles {
         let address = self.registers.read(op.base_reg());
         let new_val = self.registers.read(op.src_reg());
 
@@ -357,7 +396,7 @@ impl Cpu {
         // TODO: Cycles should be 1S + 2N + 1I
     }
 
-    fn arm_data_processing(&mut self, op: data_processing::Op) -> CycleCost {
+    fn arm_data_processing(&mut self, op: data_processing::Op) -> Cycles {
         let opcode = op.op();
         let lhs = self.registers.read(op.operand1());
         let rhs = if op.is_imm_operand() {
@@ -394,10 +433,10 @@ impl Cpu {
         // Reg shift: 1S + 1I
         // PC written: 2S + 1N
         // Reg shift + PC written: 2S + 1n + 1I
-        CycleCost(12)
+        Cycles(12)
     }
 
-    fn arm_psr_transfer_msr(&mut self, op: psr_transfer_msr::Op) -> CycleCost {
+    fn arm_psr_transfer_msr(&mut self, op: psr_transfer_msr::Op) -> Cycles {
         let val = self.registers.read(op.rm()) >> 28;
         let dest = match op.dest_psr() {
             PsrLocation::Cpsr => self.registers.get_cpsr_mut(),
@@ -417,10 +456,10 @@ impl Cpu {
         dest.set_overflow_condition(new_overflow);
 
         // TODO: Cycles should be 1S
-        CycleCost(6)
+        Cycles(6)
     }
 
-    fn arm_psr_transfer_mrs(&mut self, op: psr_transfer_mrs::Op) -> CycleCost {
+    fn arm_psr_transfer_mrs(&mut self, op: psr_transfer_mrs::Op) -> Cycles {
         let src = match op.src_psr() {
             PsrLocation::Cpsr => self.registers.read_cpsr().into_bytes(),
             PsrLocation::Spsr => self.registers.read_spsr().into_bytes(),
@@ -429,10 +468,10 @@ impl Cpu {
         // Bytes are BE
         self.registers.write(dst, u32::from_be_bytes(src));
         // TODO: Cycles should be 1S
-        CycleCost(6)
+        Cycles(6)
     }
 
-    fn arm_psr_transfer_imm(&mut self, op: psr_transfer_msr::OpImm) -> CycleCost {
+    fn arm_psr_transfer_imm(&mut self, op: psr_transfer_msr::OpImm) -> Cycles {
         let val = if op.is_imm_operand() {
             op.src_operand().as_rot_imm().value()
         } else {
@@ -457,10 +496,10 @@ impl Cpu {
         dest.set_overflow_condition(new_overflow);
 
         // TODO: Cycles should be 1S
-        CycleCost(6)
+        Cycles(6)
     }
 
-    fn arm_multiply(&mut self, op: multiply::Op) -> CycleCost {
+    fn arm_multiply(&mut self, op: multiply::Op) -> Cycles {
         use AccumulateType::*;
         let lhs = self.registers.read(op.rs());
         let rhs = self.registers.read(op.rm());
@@ -486,10 +525,10 @@ impl Cpu {
         // 3 if bits [32:24] of the multiplier operand are all zero or all one.
         // 4 in all other cases.
         // Do we want to be this precise though?
-        CycleCost(20)
+        Cycles(20)
     }
 
-    fn arm_multiply_long(&mut self, op: multiply_long::Op) -> CycleCost {
+    fn arm_multiply_long(&mut self, op: multiply_long::Op) -> Cycles {
         use AccumulateType::*;
         let lhs = self.registers.read(op.rs());
         let rhs = self.registers.read(op.rm());
@@ -519,10 +558,10 @@ impl Cpu {
         // TODO: Cycles should be MULL: 1S + (m+1)I, and MLAL: 1S + (m+2)I
         // where `m` depends on how many bits are zero (look at docs)
         // Do we want to be this precise though?
-        CycleCost(20)
+        Cycles(20)
     }
 
-    fn arm_halfword_data_transfer(&mut self, op: halfword_data_transfer::Op) -> CycleCost {
+    fn arm_halfword_data_transfer(&mut self, op: halfword_data_transfer::Op) -> Cycles {
         use LoadOrStore::*;
         use PreOrPostIndexing::*;
         use ShType::*;
@@ -628,7 +667,7 @@ mod tests {
     }
 
     fn setup_cpu(start_memory: Vec<u8>) -> Cpu {
-        let memory = GbaMemory::new();
+        let memory = Rc::new(RefCell::new(GbaMemory::new()));
         memory
             .borrow_mut()
             .insert_cartridge(Cartridge::new_with_contents(start_memory));
@@ -636,9 +675,9 @@ mod tests {
     }
 
     /// `expected_mem` is a vector of (address, value)
-    fn assert_memory_state_eq(mem: &Rc<RefCell<GbaMemory>>, expected_mem: Vec<(u32, u32)>) {
+    fn assert_memory_state_eq(mem: &Rc<RefCell<GbaMemory>>, expected_mem: &[(u32, u32)]) {
         let mem = mem.borrow();
-        for (addr, expected_val) in expected_mem {
+        for &(addr, expected_val) in expected_mem {
             let (actual_val, _) = mem.read_le_word(addr);
             assert_eq!(
                 actual_val, expected_val,
@@ -648,8 +687,8 @@ mod tests {
         }
     }
 
-    fn assert_cpu_state_eq(cpu: &Cpu, expected_regs: Vec<(RegisterName, u32)>) {
-        for (reg, expected_val) in expected_regs {
+    fn assert_cpu_state_eq(cpu: &Cpu, expected_regs: &[(RegisterName, u32)]) {
+        for &(reg, expected_val) in expected_regs {
             let actual_val = cpu.registers.read(reg);
             assert_eq!(
                 actual_val, expected_val,
@@ -665,42 +704,55 @@ mod tests {
             0xe3a00001, // mov r0, #1
             0xe3a01002, // mov r1, #2
             0xe92d8003, // stmfd sp!, {r0-r1, pc}
+            0xe3a00003, // mov r0, #3
+            0xe3a01004, // mov r1, #4
             0xe8bd8003, // ldmfd sp!, {r0-r1, pc}
         ]));
 
         // mov r0, #1
         cpu.tick();
-        assert_cpu_state_eq(&cpu, vec![(R0, 1)]);
+        assert_cpu_state_eq(&cpu, &[(R0, 1)]);
 
         // mov r1, #2
         cpu.tick();
-        assert_cpu_state_eq(&cpu, vec![(R1, 2)]);
+        assert_cpu_state_eq(&cpu, &[(R1, 2)]);
 
         // stmfd sp!, {r0-r1, pc}
         cpu.tick();
         let pc = cpu.registers.read(PROGRAM_COUNTER);
         assert_memory_state_eq(
             &cpu.memory,
-            vec![
+            &[
                 (DEFAULT_STACKPOINTER_USER - 4, pc),
                 (DEFAULT_STACKPOINTER_USER - 8, 2),
                 (DEFAULT_STACKPOINTER_USER - 12, 1),
             ],
         );
-        assert_cpu_state_eq(&cpu, vec![(STACK_POINTER, DEFAULT_STACKPOINTER_USER - 12)]);
+        assert_cpu_state_eq(&cpu, &[(STACK_POINTER, DEFAULT_STACKPOINTER_USER - 12)]);
+
+        // mov r0, #3
+        cpu.tick();
+        assert_cpu_state_eq(&cpu, &[(R0, 3)]);
+
+        // mov r1, #4
+        cpu.tick();
+        assert_cpu_state_eq(&cpu, &[(R1, 4)]);
 
         // ldmfd sp!, {r0-r1, pc}
         cpu.tick();
         let pc = cpu.registers.read(PROGRAM_COUNTER);
         assert_memory_state_eq(
             &cpu.memory,
-            vec![
+            &[
                 (DEFAULT_STACKPOINTER_USER - 4, pc),
                 (DEFAULT_STACKPOINTER_USER - 8, 2),
                 (DEFAULT_STACKPOINTER_USER - 12, 1),
             ],
         );
-        assert_cpu_state_eq(&cpu, vec![(STACK_POINTER, DEFAULT_STACKPOINTER_USER)]);
+        assert_cpu_state_eq(
+            &cpu,
+            &[(STACK_POINTER, DEFAULT_STACKPOINTER_USER), (R0, 1), (R1, 2)],
+        );
 
         // TODO: Test something like:
         // stmfd   sp!, {r0-r1, pc}

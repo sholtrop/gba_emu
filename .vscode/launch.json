@@ -7,34 +7,34 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'core'",
+            "name": "Debug executable 'emu_core'",
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=core",
-                    "--package=core"
+                    "--bin=emu_core",
+                    "--package=emu_core"
                 ],
                 "filter": {
-                    "name": "core",
+                    "name": "emu_core",
                     "kind": "bin"
                 }
             },
-            "args": ["core/test_programs/arm/plus_compare/program.bin"],
+            "args": ["emu_core/test_programs/arm/plus_compare/program.bin"],
             "cwd": "${workspaceFolder}"
         },
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in executable 'core'",
+            "name": "Debug unit tests in executable 'emu_core'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
-                    "--bin=core",
-                    "--package=core"
+                    "--bin=emu_core",
+                    "--package=emu_core"
                 ],
                 "filter": {
-                    "name": "core",
+                    "name": "emu_core",
                     "kind": "bin"
                 }
             },

@@ -1,8 +1,4 @@
-use std::{
-    cell::RefCell,
-    ops::{Add, AddAssign},
-    rc::Rc,
-};
+use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 use crate::cartridge::Cartridge;
 
@@ -37,9 +33,9 @@ pub const HALFWORD: usize = 2;
 pub const WORD: usize = 4;
 
 #[derive(Clone, Copy, Debug)]
-pub struct CycleCost(pub u8);
+pub struct Cycles(pub u8);
 
-impl Add for CycleCost {
+impl Add for Cycles {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
@@ -47,9 +43,23 @@ impl Add for CycleCost {
     }
 }
 
-impl AddAssign for CycleCost {
+impl AddAssign for Cycles {
     fn add_assign(&mut self, rhs: Self) {
         self.0 += rhs.0;
+    }
+}
+
+impl Sub for Cycles {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self(self.0 - rhs.0)
+    }
+}
+
+impl SubAssign for Cycles {
+    fn sub_assign(&mut self, rhs: Self) {
+        self.0 -= rhs.0
     }
 }
 
@@ -105,8 +115,8 @@ pub struct GbaMemory {
 }
 
 impl GbaMemory {
-    pub fn new() -> Rc<RefCell<Self>> {
-        Rc::new(RefCell::new(Self {
+    pub fn new() -> Self {
+        Self {
             system_rom: Box::new([0; 16 * KB]),
             ew_ram: Box::new([0; 256 * KB]),
             iw_ram: Box::new([0; 32 * KB]),
@@ -116,32 +126,32 @@ impl GbaMemory {
             oam: Box::new([0; KB]),
             cartridge: Cartridge::new(),
             last_access_addr: 0x0,
-        }))
+        }
     }
 
-    pub fn write_byte(&mut self, address: u32, value: u8) -> CycleCost {
+    pub fn write_byte(&mut self, address: u32, value: u8) -> Cycles {
         self.write::<BYTE>(address, &value.to_le_bytes())
     }
 
-    pub fn write_le_halfword(&mut self, address: u32, value: u16) -> CycleCost {
+    pub fn write_le_halfword(&mut self, address: u32, value: u16) -> Cycles {
         self.write::<HALFWORD>(address, &value.to_le_bytes())
     }
 
-    pub fn write_le_word(&mut self, address: u32, value: u32) -> CycleCost {
+    pub fn write_le_word(&mut self, address: u32, value: u32) -> Cycles {
         self.write::<WORD>(address, &value.to_le_bytes())
     }
 
-    pub fn read_byte(&self, address: u32) -> (u8, CycleCost) {
+    pub fn read_byte(&self, address: u32) -> (u8, Cycles) {
         let (val, cycles) = self.read::<BYTE>(address);
         (val[0], cycles)
     }
 
-    pub fn read_le_halfword(&self, address: u32) -> (u16, CycleCost) {
+    pub fn read_le_halfword(&self, address: u32) -> (u16, Cycles) {
         let (val, cycles) = self.read::<HALFWORD>(address);
         (u16::from_le_bytes(val), cycles)
     }
 
-    pub fn read_le_word(&self, address: u32) -> (u32, CycleCost) {
+    pub fn read_le_word(&self, address: u32) -> (u32, Cycles) {
         let (val, cycles) = self.read::<WORD>(address);
         (u32::from_le_bytes(val), cycles)
     }
@@ -150,7 +160,7 @@ impl GbaMemory {
         self.cartridge = cartridge;
     }
 
-    fn read<const SIZE: usize>(&self, address: u32) -> ([u8; SIZE], CycleCost) {
+    fn read<const SIZE: usize>(&self, address: u32) -> ([u8; SIZE], Cycles) {
         let (src, start_addr): (&[u8], usize) = match self.get_mem_region(address) {
             (MemoryRegion::System, addr) => (&*self.system_rom, addr),
             (MemoryRegion::EwRam, addr) => (&*self.ew_ram, addr),
@@ -166,9 +176,9 @@ impl GbaMemory {
 
         let bytes: [u8; SIZE] = src[range].try_into().unwrap();
         // TODO: Actual cost
-        let cost = CycleCost(1);
+        let cost = Cycles(1);
         if SIZE == 4 {
-            println!(
+            log::debug!(
                 "Read {:#X} from {:#X}",
                 u32::from_le_bytes(bytes[0..4].try_into().unwrap()),
                 address
@@ -177,9 +187,9 @@ impl GbaMemory {
         (bytes, cost)
     }
 
-    fn write<const SIZE: usize>(&mut self, address: u32, value: &[u8; SIZE]) -> CycleCost {
+    fn write<const SIZE: usize>(&mut self, address: u32, value: &[u8; SIZE]) -> Cycles {
         if SIZE == 4 {
-            println!(
+            log::debug!(
                 "Write {:#X} to {:#X}",
                 u32::from_le_bytes(value[0..4].try_into().unwrap()),
                 address
@@ -201,7 +211,7 @@ impl GbaMemory {
             addr += 1;
         }
         // TODO: Actual cost
-        CycleCost(1)
+        Cycles(1)
     }
 
     /// Returns the [MemoryRegion] corresponding to this address along with an address used to index it, according to the passed in `address`.

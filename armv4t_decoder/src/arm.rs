@@ -485,7 +485,6 @@ impl From<ShiftRegister> for Operand12Bit {
 
 impl From<RegisterName> for Operand12Bit {
     fn from(rn: RegisterName) -> Self {
-        dbg!(RegisterName::into_bytes(rn).unwrap());
         Self::from_bytes([RegisterName::into_bytes(rn).unwrap(), 0])
     }
 }
