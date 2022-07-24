@@ -1,14 +1,15 @@
-use crate::memory::WORD;
+use crate::bus::Bus;
+use crate::memcontroller::WORD;
 use crate::registers::psr::ProcessorMode::{self, *};
 use crate::{
     alu::{Alu, AluSetCpsr},
     instruction::Armv4tInstruction,
-    memory::{Cycles, GbaMemory},
+    memcontroller::MemoryController,
     registers::CpuRegisters,
 };
-
 use armv4t_decoder::arm::halfword_data_transfer::ShType;
 use armv4t_decoder::{arm::*, common::*, thumb::ThumbInstruction};
+use std::ops::{Add, AddAssign, Sub, SubAssign};
 use std::{cell::RefCell, rc::Rc};
 
 pub const STACK_POINTER: RegisterName = RegisterName::R13;
@@ -34,9 +35,40 @@ pub enum HardwareInterrupt {
     GamePak = 1 << 13,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct Cycles(pub u8);
+
+impl Add for Cycles {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self(self.0 + rhs.0)
+    }
+}
+
+impl AddAssign for Cycles {
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 += rhs.0;
+    }
+}
+
+impl Sub for Cycles {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self(self.0 - rhs.0)
+    }
+}
+
+impl SubAssign for Cycles {
+    fn sub_assign(&mut self, rhs: Self) {
+        self.0 -= rhs.0
+    }
+}
+
 pub struct Cpu {
     registers: CpuRegisters,
-    memory: Rc<RefCell<GbaMemory>>,
+    memory: Rc<RefCell<MemoryController>>,
     current_tick_cycles: Cycles,
 }
 
@@ -44,7 +76,7 @@ impl Cpu {
     pub const CYCLES_PER_SECOND: usize = 1 << 24;
     pub const FRAMES_PER_SECOND: usize = 60;
 
-    pub fn new(memory: Rc<RefCell<GbaMemory>>, pc: u32) -> Self {
+    pub fn new(memory: Rc<RefCell<MemoryController>>, pc: u32) -> Self {
         Self {
             registers: CpuRegisters::new(pc),
             memory,
@@ -653,7 +685,8 @@ impl Cpu {
 mod tests {
     use super::*;
     use crate::{
-        cartridge::Cartridge, memory::CART_ROM_START, registers::psr::DEFAULT_STACKPOINTER_USER,
+        cartridge::Cartridge, memcontroller::CART_ROM_START,
+        registers::psr::DEFAULT_STACKPOINTER_USER,
     };
     use byteorder::{LittleEndian, WriteBytesExt};
     use RegisterName::*;
@@ -667,7 +700,7 @@ mod tests {
     }
 
     fn setup_cpu(start_memory: Vec<u8>) -> Cpu {
-        let memory = Rc::new(RefCell::new(GbaMemory::new()));
+        let memory = Rc::new(RefCell::new(MemoryController::new()));
         memory
             .borrow_mut()
             .insert_cartridge(Cartridge::new_with_contents(start_memory));
@@ -675,7 +708,7 @@ mod tests {
     }
 
     /// `expected_mem` is a vector of (address, value)
-    fn assert_memory_state_eq(mem: &Rc<RefCell<GbaMemory>>, expected_mem: &[(u32, u32)]) {
+    fn assert_memory_state_eq(mem: &Rc<RefCell<MemoryController>>, expected_mem: &[(u32, u32)]) {
         let mem = mem.borrow();
         for &(addr, expected_val) in expected_mem {
             let (actual_val, _) = mem.read_le_word(addr);

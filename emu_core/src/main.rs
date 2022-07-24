@@ -1,16 +1,18 @@
 mod alu;
 mod bios;
+mod bus;
 mod cartridge;
 mod cpu;
 mod emulator;
 mod instruction;
-mod memory;
+mod memcontroller;
 mod mmio;
+mod ram;
 mod registers;
 
 use cartridge::Cartridge;
 use cpu::Cpu;
-use memory::{GbaMemory, CART_ROM_START};
+use memcontroller::{MemoryController, CART_ROM_START};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -30,7 +32,7 @@ fn main() {
     let cartridge = Cartridge::new().read_file(cartridge_filename);
 
     log::debug!("{}", cartridge.game_title());
-    let memory = Rc::new(RefCell::new(GbaMemory::new()));
+    let memory = Rc::new(RefCell::new(MemoryController::new()));
     memory.borrow_mut().insert_cartridge(cartridge);
     let mut cpu = Cpu::new(memory, CART_ROM_START as u32);
 
