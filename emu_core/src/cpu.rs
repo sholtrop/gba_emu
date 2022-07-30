@@ -1,5 +1,5 @@
-use crate::bus::Bus;
-use crate::memcontroller::WORD;
+use crate::alu::AluResult;
+use crate::bus::{Bus, WORD};
 use crate::registers::psr::ProcessorMode::{self, *};
 use crate::{
     alu::{Alu, AluSetCpsr},
@@ -7,9 +7,11 @@ use crate::{
     memcontroller::MemoryController,
     registers::CpuRegisters,
 };
+use armv4t_decoder::arm::data_processing::OpCode;
 use armv4t_decoder::arm::halfword_data_transfer::ShType;
+use armv4t_decoder::thumb;
 use armv4t_decoder::{arm::*, common::*, thumb::ThumbInstruction};
-use std::ops::{Add, AddAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Mul, Sub, SubAssign};
 use std::{cell::RefCell, rc::Rc};
 
 pub const STACK_POINTER: RegisterName = RegisterName::R13;
@@ -63,6 +65,14 @@ impl Sub for Cycles {
 impl SubAssign for Cycles {
     fn sub_assign(&mut self, rhs: Self) {
         self.0 -= rhs.0
+    }
+}
+
+impl Mul<u8> for Cycles {
+    type Output = Self;
+
+    fn mul(self, rhs: u8) -> Self::Output {
+        Self(self.0 * rhs)
     }
 }
 
@@ -210,27 +220,75 @@ impl Cpu {
 
     fn exec_thumb(&mut self, instr: ThumbInstruction) -> Cycles {
         use armv4t_decoder::thumb::ThumbInstruction::*;
+
         match instr {
-            AddOffsetToStackPointer(op) => {}
-            SoftwareInterrupt(op) => {}
-            UnconditionalBranch(op) => {}
-            MultipleLoadstore(op) => {}
-            LongBranchWithLink(op) => {}
-            PushPopRegister(op) => {}
-            LoadStoreHalfWord(op) => {}
-            MoveShiftedRegister(op) => {}
-            SpRelativeLoadStore(op) => {}
-            LoadAddress(op) => {}
-            ConditionalBranch(op) => {}
-            LoadStoreImmOffset(op) => {}
-            LoadStoreRegOffset(op) => {}
-            LoadStoreSignExtHalfwordByte(op) => {}
-            PcRelativeLoad(op) => {}
-            HiRegOpsBranchExchange(op) => {}
-            AluOps(op) => {}
-            MoveCompAddSubtractImm(op) => {}
-            AddSub(op) => {}
+            AddOffsetToStackPointer(op) => self.thumb_add_offset_sp(op),
+            SoftwareInterrupt(op) => {
+                todo!()
+            }
+            UnconditionalBranch(op) => {
+                todo!()
+            }
+            MultipleLoadstore(op) => {
+                todo!()
+            }
+            LongBranchWithLink(op) => {
+                todo!()
+            }
+            PushPopRegister(op) => {
+                todo!()
+            }
+            LoadStoreHalfWord(op) => {
+                todo!()
+            }
+            MoveShiftedRegister(op) => {
+                todo!()
+            }
+            SpRelativeLoadStore(op) => {
+                todo!()
+            }
+            LoadAddress(op) => {
+                todo!()
+            }
+            ConditionalBranch(op) => {
+                todo!()
+            }
+            LoadStoreImmOffset(op) => {
+                todo!()
+            }
+            LoadStoreRegOffset(op) => {
+                todo!()
+            }
+            LoadStoreSignExtHalfwordByte(op) => {
+                todo!()
+            }
+            PcRelativeLoad(op) => {
+                todo!()
+            }
+            HiRegOpsBranchExchange(op) => {
+                todo!()
+            }
+            AluOps(op) => {
+                todo!()
+            }
+            MoveCompAddSubtractImm(op) => {
+                todo!()
+            }
+            AddSub(op) => {
+                todo!()
+            }
         }
+    }
+
+    fn thumb_add_offset_sp(&mut self, op: thumb::add_offset_to_stack_pointer::Op) -> Cycles {
+        let cpsr = self.registers.get_cpsr();
+        let offset = op.get_imm() as i32;
+        let sp = self.registers.read(STACK_POINTER);
+        let op = if offset < 0 { OpCode::Sub } else { OpCode::Add };
+        let AluResult { value, .. } =
+            Alu::exec_op(op, sp, offset as u32, AluSetCpsr::Preserve(cpsr));
+        self.registers.write(STACK_POINTER, value);
+        // TODO: Cycles should be same as arm::data_processing of the equivalent instruction
         Cycles(1)
     }
 
@@ -786,11 +844,14 @@ mod tests {
             &cpu,
             &[(STACK_POINTER, DEFAULT_STACKPOINTER_USER), (R0, 1), (R1, 2)],
         );
+    }
 
-        // TODO: Test something like:
-        // stmfd   sp!, {r0-r1, pc}
-        // ldmfd   sp!, {r0-r1, pc}
-        // Which should restore everything
-        // Decrement addressing seems to be completely wrong (page 84 of datasheet)
+    #[test]
+    fn test_i32_u32_conv() {
+        // Sanity check
+        let signed = -1_i32;
+        let unsigned = signed as u32;
+        let signed_again = unsigned as i32;
+        assert_eq!(signed, signed_again);
     }
 }

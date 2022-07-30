@@ -32,11 +32,7 @@ const OAM_START: usize = 0x700_0000;
 const OAM_END: usize = 0x700_03FF;
 
 pub const CART_ROM_START: usize = 0x800_0000;
-const CART_SRAM_START: usize = 0xE00_0000;
-
-pub const BYTE: usize = 1;
-pub const HALFWORD: usize = 2;
-pub const WORD: usize = 4;
+pub const CART_SRAM_START: usize = 0xE00_0000;
 
 pub type Shared<T> = Rc<RefCell<T>>;
 
@@ -136,8 +132,6 @@ impl MemoryController {
 
 impl Bus for MemoryController {
     fn read<const SIZE: usize>(&self, address: u32) -> ([u8; SIZE], Cycles) {
-        let x = *self.ew_ram.borrow();
-
         match self.get_mem_region(address) {
             (MemoryRegion::System, address) => self.system_rom.read(address),
             (MemoryRegion::EwRam, address) => self.ew_ram.borrow().read(address),
@@ -146,33 +140,8 @@ impl Bus for MemoryController {
             (MemoryRegion::PalRam, address) => self.pal_ram.borrow().read(address),
             (MemoryRegion::Vram, address) => self.vram.borrow().read(address),
             (MemoryRegion::Oam, address) => self.oam.borrow().read(address),
-            (MemoryRegion::Cartridge, address) => self.cartridge.read(address),
+            (MemoryRegion::Cartridge, address) => todo!(), // self.cartridge.read(address),
         }
-
-        // let (src, start_addr): (Box<dyn Bus>, usize) = match self.get_mem_region(address) {
-        //     (MemoryRegion::System, addr) => todo!("read instr after instr that issued this read"),
-        //     (MemoryRegion::EwRam, addr) => (&*self.ew_ram, addr),
-        //     (MemoryRegion::IwRam, addr) => (&*self.iw_ram, addr),
-        //     (MemoryRegion::IoRam, addr) => (&*self.io_ram, addr),
-        //     (MemoryRegion::PalRam, addr) => (&*self.pal_ram, addr),
-        //     (MemoryRegion::Vram, addr) => (&*self.vram, addr),
-        //     (MemoryRegion::Oam, addr) => (&*self.oam, addr),
-        //     (MemoryRegion::Cartridge, addr) => (self.cartridge.mem(), addr),
-        // };
-        // let end_addr = start_addr + SIZE;
-        // let range = start_addr..end_addr;
-
-        // let bytes: [u8; SIZE] = src[range].try_into().unwrap();
-        // // TODO: Actual cost
-        // let cost = Cycles(1);
-        // if SIZE == 4 {
-        //     log::debug!(
-        //         "Read {:#X} from {:#X}",
-        //         u32::from_le_bytes(bytes[0..4].try_into().unwrap()),
-        //         address
-        //     );
-        // }
-        // (bytes, cost)
     }
 
     fn write<const SIZE: usize>(&mut self, address: u32, value: &[u8; SIZE]) -> Cycles {
@@ -183,22 +152,22 @@ impl Bus for MemoryController {
                 address
             );
         }
-        let (src, mut addr): (&mut [u8], usize) = match self.get_mem_region(address) {
-            (MemoryRegion::System, addr) => (&mut *self.system_rom, addr),
-            (MemoryRegion::EwRam, addr) => (&mut *self.ew_ram, addr),
-            (MemoryRegion::IwRam, addr) => (&mut *self.iw_ram, addr),
-            (MemoryRegion::IoRam, addr) => (&mut *self.io_ram, addr),
-            (MemoryRegion::PalRam, addr) => (&mut *self.pal_ram, addr),
-            (MemoryRegion::Vram, addr) => (&mut *self.vram, addr),
-            (MemoryRegion::Oam, addr) => (&mut *self.oam, addr),
-            (MemoryRegion::Cartridge, addr) => (self.cartridge.mem_mut(), addr),
-        };
-        // dbg!("WRITE", &addr);
-        for byte in value.iter() {
-            src[addr] = *byte;
-            addr += 1;
+        match self.get_mem_region(address) {
+            (MemoryRegion::System, address) => self.system_rom.write(address, value),
+            (MemoryRegion::EwRam, address) => self.ew_ram.borrow_mut().write(address, value),
+            (MemoryRegion::IwRam, address) => self.iw_ram.borrow_mut().write(address, value),
+            (MemoryRegion::IoRam, address) => self.io_ram.borrow_mut().write(address, value),
+            (MemoryRegion::PalRam, address) => self.pal_ram.borrow_mut().write(address, value),
+            (MemoryRegion::Vram, address) => self.vram.borrow_mut().write(address, value),
+            (MemoryRegion::Oam, address) => self.oam.borrow_mut().write(address, value),
+            (MemoryRegion::Cartridge, address) => todo!(),
         }
-        // TODO: Actual cost
-        Cycles(1)
+        // dbg!("WRITE", &addr);
+        // for byte in value.iter() {
+        //     src[addr] = *byte;
+        //     addr += 1;
+        // }
+        // // TODO: Actual cost
+        // Cycles(1)
     }
 }
