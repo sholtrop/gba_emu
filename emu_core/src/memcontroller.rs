@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     bios::Bios,
-    bus::Bus,
+    bus::{Bus, BYTE, HALFWORD, WORD},
     cartridge::Cartridge,
     cpu::Cycles,
     ram::{EwRam, IoRam, IwRam, Oam, PaletteRam, Vram},
@@ -84,7 +84,7 @@ pub struct MemoryController {
 
     // Where save data is stored. Variable size, about 64kb.
     // 0x800_000 ~ var
-    cartridge: Cartridge,
+    cartridge: Option<Cartridge>,
 
     /// Address of the last performed mem read/write
     /// Used to determine whether current access is sequential (S) or non-sequential (N)
@@ -101,13 +101,59 @@ impl MemoryController {
             pal_ram: PaletteRam::new(),
             vram: Vram::new(),
             oam: Oam::new(),
-            cartridge: Cartridge::new(),
+            cartridge: None,
             last_access_addr: 0x0,
         }
     }
 
     pub fn insert_cartridge(&mut self, cartridge: Cartridge) {
-        self.cartridge = cartridge;
+        self.cartridge = Some(cartridge);
+    }
+
+    fn log_write(&self, size: usize, address: u32, value: &[u8]) {
+        match size {
+            BYTE => {
+                log::debug!("Write {:#X} to {:#X}", value[0], address);
+            }
+            HALFWORD => {
+                log::debug!(
+                    "Write {:#X} to {:#X}",
+                    u16::from_le_bytes(value[0..2].try_into().unwrap()),
+                    address
+                );
+            }
+            WORD => {
+                log::debug!(
+                    "Write {:#X} to {:#X}",
+                    u32::from_le_bytes(value[0..4].try_into().unwrap()),
+                    address
+                );
+            }
+            _ => {}
+        }
+    }
+
+    fn log_read(&self, size: usize, address: u32, value: &[u8]) {
+        match size {
+            BYTE => {
+                log::debug!("Read {:#X} from {:#X}", value[0], address);
+            }
+            HALFWORD => {
+                log::debug!(
+                    "Read {:#X} from {:#X}",
+                    u16::from_le_bytes(value[0..2].try_into().unwrap()),
+                    address
+                );
+            }
+            WORD => {
+                log::debug!(
+                    "Read {:#X} from {:#X}",
+                    u32::from_le_bytes(value[0..4].try_into().unwrap()),
+                    address
+                );
+            }
+            _ => {}
+        }
     }
 
     /// Returns the [MemoryRegion] corresponding to this address along with an address used to index it, according to the passed in `address`.
@@ -132,7 +178,8 @@ impl MemoryController {
 
 impl Bus for MemoryController {
     fn read<const SIZE: usize>(&self, address: u32) -> ([u8; SIZE], Cycles) {
-        match self.get_mem_region(address) {
+        let size = SIZE;
+        let (value, cycles) = match self.get_mem_region(address) {
             (MemoryRegion::System, address) => self.system_rom.read(address),
             (MemoryRegion::EwRam, address) => self.ew_ram.borrow().read(address),
             (MemoryRegion::IwRam, address) => self.iw_ram.borrow().read(address),
@@ -140,18 +187,19 @@ impl Bus for MemoryController {
             (MemoryRegion::PalRam, address) => self.pal_ram.borrow().read(address),
             (MemoryRegion::Vram, address) => self.vram.borrow().read(address),
             (MemoryRegion::Oam, address) => self.oam.borrow().read(address),
-            (MemoryRegion::Cartridge, address) => todo!(), // self.cartridge.read(address),
-        }
+            (MemoryRegion::Cartridge, address) => self
+                .cartridge
+                .as_ref()
+                .expect("No cartridge inserted")
+                .read(address),
+        };
+        self.log_read(size, address, &value);
+        (value, cycles)
     }
 
     fn write<const SIZE: usize>(&mut self, address: u32, value: &[u8; SIZE]) -> Cycles {
-        if SIZE == 4 {
-            log::debug!(
-                "Write {:#X} to {:#X}",
-                u32::from_le_bytes(value[0..4].try_into().unwrap()),
-                address
-            );
-        }
+        let size = SIZE;
+        self.log_write(size, address, value);
         match self.get_mem_region(address) {
             (MemoryRegion::System, address) => self.system_rom.write(address, value),
             (MemoryRegion::EwRam, address) => self.ew_ram.borrow_mut().write(address, value),
@@ -160,14 +208,11 @@ impl Bus for MemoryController {
             (MemoryRegion::PalRam, address) => self.pal_ram.borrow_mut().write(address, value),
             (MemoryRegion::Vram, address) => self.vram.borrow_mut().write(address, value),
             (MemoryRegion::Oam, address) => self.oam.borrow_mut().write(address, value),
-            (MemoryRegion::Cartridge, address) => todo!(),
+            (MemoryRegion::Cartridge, address) => self
+                .cartridge
+                .as_mut()
+                .expect("No cartridge inserted")
+                .write(address, value),
         }
-        // dbg!("WRITE", &addr);
-        // for byte in value.iter() {
-        //     src[addr] = *byte;
-        //     addr += 1;
-        // }
-        // // TODO: Actual cost
-        // Cycles(1)
     }
 }

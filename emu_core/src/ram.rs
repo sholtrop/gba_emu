@@ -51,10 +51,10 @@ pub type EwRam = Ram<{ 256 * KB }, 3, HALFWORD>;
 
 pub type IwRam = Ram<{ 32 * KB }, 1, WORD>;
 
-pub type IoRam = Ram<{ 1 * KB }, 1, WORD>;
+pub type IoRam = Ram<{ KB }, 1, WORD>;
 
-pub type PaletteRam = Ram<{ 1 * KB }, 1, HALFWORD>;
+pub type PaletteRam = Ram<{ KB }, 1, HALFWORD>;
 
 pub type Vram = Ram<{ 96 * KB }, 1, HALFWORD>;
 
-pub type Oam = Ram<{ 1 * KB }, 1, WORD>;
+pub type Oam = Ram<{ KB }, 1, WORD>;
