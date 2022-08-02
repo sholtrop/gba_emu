@@ -1,7 +1,7 @@
 use crate::{bus::Bus, cpu::Cycles};
 
 // TODO: write
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Bios {}
 
 impl Bios {

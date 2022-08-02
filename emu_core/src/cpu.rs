@@ -78,7 +78,7 @@ impl Mul<u8> for Cycles {
 
 pub struct Cpu {
     registers: CpuRegisters,
-    memory: Rc<RefCell<MemoryController>>,
+    mem_controller: MemoryController,
     current_tick_cycles: Cycles,
 }
 
@@ -86,10 +86,10 @@ impl Cpu {
     pub const CYCLES_PER_SECOND: usize = 1 << 24;
     pub const FRAMES_PER_SECOND: usize = 60;
 
-    pub fn new(memory: Rc<RefCell<MemoryController>>, pc: u32) -> Self {
+    pub fn new(memory: MemoryController, pc: u32) -> Self {
         Self {
             registers: CpuRegisters::new(pc),
-            memory,
+            mem_controller: memory,
             current_tick_cycles: Cycles(0),
         }
     }
@@ -129,12 +129,12 @@ impl Cpu {
             InstructionMode::Thumb => {
                 pc_offset = 2;
 
-                let (val, cycles) = self.memory.borrow().read_le_halfword(pc);
+                let (val, cycles) = self.mem_controller.read_le_halfword(pc);
                 (val as u32, cycles)
             }
             InstructionMode::Arm => {
                 pc_offset = 4;
-                self.memory.borrow().read_le_word(pc)
+                self.mem_controller.read_le_word(pc)
             }
         };
         self.pc_add_offset(pc_offset);
@@ -329,13 +329,14 @@ impl Cpu {
             }
         };
 
-        let mut mem = self.memory.borrow_mut();
         let mut cycle_cost = Cycles(0);
         for reg in reg_iter {
             cycle_cost += match op.load_store() {
-                Store => mem.write_le_word(address as u32, self.registers.read(reg)),
+                Store => self
+                    .mem_controller
+                    .write_le_word(address as u32, self.registers.read(reg)),
                 Load => {
-                    let (val, cycles) = mem.read_le_word(address as u32);
+                    let (val, cycles) = self.mem_controller.read_le_word(address as u32);
                     self.registers.write(reg, val);
                     cycles
                 }
@@ -435,23 +436,21 @@ impl Cpu {
         let cycle_cost = match op.load_store() {
             Load => {
                 let dst = op.reg_dest();
-                let mem = self.memory.borrow();
                 let (value, cycle_cost) = match op.byte_or_word() {
                     Byte => {
-                        let (val, cycles) = mem.read_byte(address);
+                        let (val, cycles) = self.mem_controller.read_byte(address);
                         (val as u32, cycles)
                     }
-                    Word => mem.read_le_word(address),
+                    Word => self.mem_controller.read_le_word(address),
                 };
                 self.registers.write(dst, value);
                 cycle_cost
             }
             Store => {
                 let value = self.registers.read(op.reg_dest());
-                let mut mem = self.memory.borrow_mut();
                 match op.byte_or_word() {
-                    Byte => mem.write_byte(address, value as u8),
-                    Word => mem.write_le_word(address, value),
+                    Byte => self.mem_controller.write_byte(address, value as u8),
+                    Word => self.mem_controller.write_le_word(address, value),
                 }
             }
         };
@@ -471,14 +470,14 @@ impl Cpu {
         match op.byte_or_word() {
             ByteOrWord::Byte => {
                 let new_val = new_val as u8;
-                let (old_val, cycles_read) = self.memory.borrow().read_byte(address);
-                let cycles_write = self.memory.borrow_mut().write_byte(address, new_val);
+                let (old_val, cycles_read) = self.mem_controller.read_byte(address);
+                let cycles_write = self.mem_controller.write_byte(address, new_val);
                 self.registers.write(op.dest_reg(), old_val as u32);
                 cycles_read + cycles_write
             }
             ByteOrWord::Word => {
-                let (old_val, cycles_read) = self.memory.borrow().read_le_word(address);
-                let cycles_write = self.memory.borrow_mut().write_le_word(address, new_val);
+                let (old_val, cycles_read) = self.mem_controller.read_le_word(address);
+                let cycles_write = self.mem_controller.write_le_word(address, new_val);
                 self.registers.write(op.dest_reg(), old_val);
                 cycles_read + cycles_write
             }
@@ -676,22 +675,22 @@ impl Cpu {
         let cycles = match (op.load_store(), op.sh_type()) {
             (Store, _) => {
                 let value = self.registers.read(op.reg_dest()) as u16;
-                self.memory.borrow_mut().write_le_halfword(addr, value)
+                self.mem_controller.write_le_halfword(addr, value)
             }
             (Load, SignedByte) => {
-                let (val, cycles) = self.memory.borrow().read_byte(addr);
+                let (val, cycles) = self.mem_controller.read_byte(addr);
                 let val = val as i8 as i32;
                 self.registers.write(op.reg_dest(), val as u32);
                 cycles
             }
             (Load, SignedHalfwords) => {
-                let (val, cycles) = self.memory.borrow().read_le_halfword(addr);
+                let (val, cycles) = self.mem_controller.read_le_halfword(addr);
                 let val = val as i16 as i32;
                 self.registers.write(op.reg_dest(), val as u32);
                 cycles
             }
             (Load, UnsignedHalfwords) => {
-                let (val, cycles) = self.memory.borrow().read_le_halfword(addr);
+                let (val, cycles) = self.mem_controller.read_le_halfword(addr);
                 self.registers.write(op.reg_dest(), val as u32);
                 cycles
             }
@@ -743,7 +742,7 @@ impl Cpu {
 mod tests {
     use super::*;
     use crate::{
-        cartridge::Cartridge, memcontroller::CART_ROM_START,
+        cartridge::Cartridge, emulator::EmulatorMemory, memcontroller::CART_ROM_START,
         registers::psr::DEFAULT_STACKPOINTER_USER,
     };
     use byteorder::{LittleEndian, WriteBytesExt};
@@ -758,16 +757,14 @@ mod tests {
     }
 
     fn setup_cpu(start_memory: Vec<u8>) -> Cpu {
-        let memory = Rc::new(RefCell::new(MemoryController::new()));
-        memory
-            .borrow_mut()
-            .insert_cartridge(Cartridge::new_with_contents(start_memory));
-        Cpu::new(memory, CART_ROM_START as u32)
+        let mut mem = EmulatorMemory::new();
+        let mem_controller = MemoryController::new(&mem);
+        mem.insert_cartridge(Cartridge::new_with_contents(start_memory));
+        Cpu::new(mem_controller, CART_ROM_START as u32)
     }
 
     /// `expected_mem` is a vector of (address, value)
-    fn assert_memory_state_eq(mem: &Rc<RefCell<MemoryController>>, expected_mem: &[(u32, u32)]) {
-        let mem = mem.borrow();
+    fn assert_memory_state_eq(mem: &MemoryController, expected_mem: &[(u32, u32)]) {
         for &(addr, expected_val) in expected_mem {
             let (actual_val, _) = mem.read_le_word(addr);
             assert_eq!(
@@ -812,7 +809,7 @@ mod tests {
         cpu.tick();
         let pc = cpu.registers.read(PROGRAM_COUNTER);
         assert_memory_state_eq(
-            &cpu.memory,
+            &cpu.mem_controller,
             &[
                 (DEFAULT_STACKPOINTER_USER - 4, pc),
                 (DEFAULT_STACKPOINTER_USER - 8, 2),
@@ -833,7 +830,7 @@ mod tests {
         cpu.tick();
         let pc = cpu.registers.read(PROGRAM_COUNTER);
         assert_memory_state_eq(
-            &cpu.memory,
+            &cpu.mem_controller,
             &[
                 (DEFAULT_STACKPOINTER_USER - 4, pc),
                 (DEFAULT_STACKPOINTER_USER - 8, 2),

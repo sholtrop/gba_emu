@@ -14,10 +14,14 @@ impl<const MEMSIZE: usize, const ACCESS_CYCLES: usize, const BUSWIDTH_BYTES: usi
 {
     const ACCESS_TIME: Cycles = Cycles(ACCESS_CYCLES as u8);
 
-    pub fn new() -> Shared<Self> {
+    pub fn new_shared() -> Shared<Self> {
         shared(Self {
             mem: Box::new([0; MEMSIZE]),
         })
+    }
+
+    pub fn as_buffer(&self) -> &[u8] {
+        &self.mem[..]
     }
 
     const fn access_cycles<const ACCESS_SIZE: usize>() -> Cycles {

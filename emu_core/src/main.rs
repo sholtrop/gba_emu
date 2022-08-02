@@ -3,6 +3,7 @@ mod bios;
 mod bus;
 mod cartridge;
 mod cpu;
+mod display;
 mod emulator;
 mod instruction;
 mod memcontroller;
@@ -10,11 +11,8 @@ mod mmio;
 mod ram;
 mod registers;
 
+use crate::{display::DummyDisplay, emulator::Emulator};
 use cartridge::Cartridge;
-use cpu::Cpu;
-use memcontroller::{MemoryController, CART_ROM_START};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 const CARTRIDGE_FILENAME: &str = "gba-tests/arm/arm.gba";
 
@@ -26,17 +24,12 @@ fn setup_logging() {
         .init();
 }
 
-fn main() {
+fn main() -> ! {
     setup_logging();
     let cartridge_filename = CARTRIDGE_FILENAME;
     let cartridge = Cartridge::new().read_file(cartridge_filename);
-
     log::debug!("{}", cartridge.game_title());
-    let memory = Rc::new(RefCell::new(MemoryController::new()));
-    memory.borrow_mut().insert_cartridge(cartridge);
-    let mut cpu = Cpu::new(memory, CART_ROM_START as u32);
-
-    loop {
-        cpu.tick();
-    }
+    let mut emu = Emulator::new(DummyDisplay {});
+    emu.insert_cartridge(cartridge);
+    emu.run();
 }

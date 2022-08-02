@@ -1,10 +1,11 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{borrow::BorrowMut, cell::RefCell, ops::DerefMut, rc::Rc};
 
 use crate::{
     bios::Bios,
     bus::{Bus, BYTE, HALFWORD, WORD},
     cartridge::Cartridge,
     cpu::Cycles,
+    emulator::EmulatorMemory,
     ram::{EwRam, IoRam, IwRam, Oam, PaletteRam, Vram},
 };
 
@@ -55,7 +56,7 @@ enum MemoryRegion {
 pub struct MemoryController {
     // BIOS memory
     // 0x00 ~ 0x3FFF
-    system_rom: Bios,
+    bios: Bios,
 
     // External work RAM
     // 0x200_0000 ~ 0x0203_FFFF
@@ -84,7 +85,7 @@ pub struct MemoryController {
 
     // Where save data is stored. Variable size, about 64kb.
     // 0x800_000 ~ var
-    cartridge: Option<Cartridge>,
+    cartridge: Shared<Option<Cartridge>>,
 
     /// Address of the last performed mem read/write
     /// Used to determine whether current access is sequential (S) or non-sequential (N)
@@ -92,22 +93,29 @@ pub struct MemoryController {
 }
 
 impl MemoryController {
-    pub fn new() -> Self {
+    pub fn new(
+        EmulatorMemory {
+            bios,
+            ew_ram,
+            iw_ram,
+            io_ram,
+            pal_ram,
+            vram,
+            oam,
+            cartridge,
+        }: &EmulatorMemory,
+    ) -> Self {
         Self {
-            system_rom: Bios::new(),
-            ew_ram: EwRam::new(),
-            iw_ram: IwRam::new(),
-            io_ram: IoRam::new(),
-            pal_ram: PaletteRam::new(),
-            vram: Vram::new(),
-            oam: Oam::new(),
-            cartridge: None,
+            bios: bios.clone(),
+            ew_ram: ew_ram.clone(),
+            iw_ram: iw_ram.clone(),
+            io_ram: io_ram.clone(),
+            pal_ram: pal_ram.clone(),
+            vram: vram.clone(),
+            oam: oam.clone(),
+            cartridge: cartridge.clone(),
             last_access_addr: 0x0,
         }
-    }
-
-    pub fn insert_cartridge(&mut self, cartridge: Cartridge) {
-        self.cartridge = Some(cartridge);
     }
 
     fn log_write(&self, size: usize, address: u32, value: &[u8]) {
@@ -180,7 +188,7 @@ impl Bus for MemoryController {
     fn read<const SIZE: usize>(&self, address: u32) -> ([u8; SIZE], Cycles) {
         let size = SIZE;
         let (value, cycles) = match self.get_mem_region(address) {
-            (MemoryRegion::System, address) => self.system_rom.read(address),
+            (MemoryRegion::System, address) => self.bios.read(address),
             (MemoryRegion::EwRam, address) => self.ew_ram.borrow().read(address),
             (MemoryRegion::IwRam, address) => self.iw_ram.borrow().read(address),
             (MemoryRegion::IoRam, address) => self.io_ram.borrow().read(address),
@@ -189,6 +197,7 @@ impl Bus for MemoryController {
             (MemoryRegion::Oam, address) => self.oam.borrow().read(address),
             (MemoryRegion::Cartridge, address) => self
                 .cartridge
+                .borrow()
                 .as_ref()
                 .expect("No cartridge inserted")
                 .read(address),
@@ -201,15 +210,15 @@ impl Bus for MemoryController {
         let size = SIZE;
         self.log_write(size, address, value);
         match self.get_mem_region(address) {
-            (MemoryRegion::System, address) => self.system_rom.write(address, value),
-            (MemoryRegion::EwRam, address) => self.ew_ram.borrow_mut().write(address, value),
-            (MemoryRegion::IwRam, address) => self.iw_ram.borrow_mut().write(address, value),
-            (MemoryRegion::IoRam, address) => self.io_ram.borrow_mut().write(address, value),
-            (MemoryRegion::PalRam, address) => self.pal_ram.borrow_mut().write(address, value),
-            (MemoryRegion::Vram, address) => self.vram.borrow_mut().write(address, value),
-            (MemoryRegion::Oam, address) => self.oam.borrow_mut().write(address, value),
-            (MemoryRegion::Cartridge, address) => self
-                .cartridge
+            (MemoryRegion::System, address) => self.bios.write(address, value),
+            (MemoryRegion::EwRam, address) => (*self.ew_ram).borrow_mut().write(address, value),
+            (MemoryRegion::IwRam, address) => (*self.iw_ram).borrow_mut().write(address, value),
+            (MemoryRegion::IoRam, address) => (*self.io_ram).borrow_mut().write(address, value),
+            (MemoryRegion::PalRam, address) => (*self.pal_ram).borrow_mut().write(address, value),
+            (MemoryRegion::Vram, address) => (*self.vram).borrow_mut().write(address, value),
+            (MemoryRegion::Oam, address) => (*self.oam).borrow_mut().write(address, value),
+            (MemoryRegion::Cartridge, address) => (*self.cartridge)
+                .borrow_mut()
                 .as_mut()
                 .expect("No cartridge inserted")
                 .write(address, value),
