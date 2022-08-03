@@ -12,7 +12,7 @@ pub struct Ram<const MEMSIZE: usize, const ACCESS_CYCLES: usize, const BUSWIDTH_
 impl<const MEMSIZE: usize, const ACCESS_CYCLES: usize, const BUSWIDTH_BYTES: usize>
     Ram<MEMSIZE, ACCESS_CYCLES, BUSWIDTH_BYTES>
 {
-    const ACCESS_TIME: Cycles = Cycles(ACCESS_CYCLES as u8);
+    const ACCESS_TIME: Cycles = Cycles(ACCESS_CYCLES as u32);
 
     pub fn new_shared() -> Shared<Self> {
         shared(Self {
@@ -54,8 +54,6 @@ impl<const MEMSIZE: usize, const ACCESS_CYCLES: usize, const BUSWIDTH: usize> Bu
 pub type EwRam = Ram<{ 256 * KB }, 3, HALFWORD>;
 
 pub type IwRam = Ram<{ 32 * KB }, 1, WORD>;
-
-pub type IoRam = Ram<{ KB }, 1, WORD>;
 
 pub type PaletteRam = Ram<{ KB }, 1, HALFWORD>;
 

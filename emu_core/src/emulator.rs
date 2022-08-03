@@ -4,12 +4,16 @@ use crate::{
     cpu::{Cpu, Cycles},
     display::EmuDisplay,
     memcontroller::{shared, MemoryController, Shared, CART_ROM_START},
+    mmio::{
+        graphics::{DisplayControlRegister, DisplayStatusRegister},
+        IoRam,
+    },
     ram::*,
 };
 
 const CYCLES_PER_FRAME: usize = Cpu::CYCLES_PER_SECOND / Cpu::FRAMES_PER_SECOND;
-const HDRAW_CYCLES: usize = 960;
-const HBLANK_CYCLES: usize = 272;
+const HDRAW_CYCLES: Cycles = Cycles(960);
+const HBLANK_CYCLES: Cycles = Cycles(272);
 const H_PIXELS: usize = 240;
 const V_PIXELS: usize = 160;
 
@@ -94,6 +98,15 @@ impl<D: EmuDisplay> Emulator<D> {
     pub fn run(&mut self) -> ! {
         loop {
             self.hdraw_counter += self.cpu.tick();
+            if self.hdraw_counter > HDRAW_CYCLES {}
         }
+    }
+
+    fn render_frame(&mut self) -> Vec<u8> {
+        let mmio = self.memory.io_ram.borrow();
+        let disp_cont = mmio.read_mmio_reg::<DisplayControlRegister>();
+        let disp_stat = mmio.read_mmio_reg::<DisplayStatusRegister>();
+
+        todo!("render frame")
     }
 }

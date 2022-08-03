@@ -38,7 +38,7 @@ pub enum HardwareInterrupt {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct Cycles(pub u8);
+pub struct Cycles(pub u32);
 
 impl Add for Cycles {
     type Output = Self;
@@ -68,11 +68,23 @@ impl SubAssign for Cycles {
     }
 }
 
-impl Mul<u8> for Cycles {
+impl Mul<u32> for Cycles {
     type Output = Self;
 
-    fn mul(self, rhs: u8) -> Self::Output {
+    fn mul(self, rhs: u32) -> Self::Output {
         Self(self.0 * rhs)
+    }
+}
+
+impl PartialEq for Cycles {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl PartialOrd for Cycles {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.0.partial_cmp(&other.0)
     }
 }
 

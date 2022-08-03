@@ -1,4 +1,4 @@
-use std::{borrow::BorrowMut, cell::RefCell, ops::DerefMut, rc::Rc};
+use std::{borrow::BorrowMut, cell::RefCell, rc::Rc};
 
 use crate::{
     bios::Bios,
@@ -6,7 +6,8 @@ use crate::{
     cartridge::Cartridge,
     cpu::Cycles,
     emulator::EmulatorMemory,
-    ram::{EwRam, IoRam, IwRam, Oam, PaletteRam, Vram},
+    mmio::IoRam,
+    ram::{EwRam, IwRam, Oam, PaletteRam, Vram},
 };
 
 pub const KB: usize = 1024;

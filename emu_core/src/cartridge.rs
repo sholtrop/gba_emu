@@ -79,7 +79,7 @@ impl Cartridge {
                 _ => unreachable!(),
             }
         } else {
-            Cycles(5) * (size as u8)
+            Cycles(5) * (size as u32)
         }
     }
 }

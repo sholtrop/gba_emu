@@ -10,6 +10,7 @@ mod memcontroller;
 mod mmio;
 mod ram;
 mod registers;
+mod renderer;
 
 use crate::{display::DummyDisplay, emulator::Emulator};
 use cartridge::Cartridge;
