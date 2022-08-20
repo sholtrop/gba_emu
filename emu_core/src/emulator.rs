@@ -1,7 +1,8 @@
 use crate::{
     bios::Bios,
     cartridge::Cartridge,
-    cpu::{Cpu, Cycles},
+    cpu::Cpu,
+    cycles::Cycles,
     display::EmuDisplay,
     memcontroller::{shared, MemoryController, Shared, CART_ROM_START},
     mmio::{

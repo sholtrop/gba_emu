@@ -22,7 +22,7 @@ pub enum Operands {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, BitfieldSpecifier)]
 
 pub struct Operand5Bit {
-    value: B5,
+    pub value: B5,
 }
 
 impl From<u8> for Operand5Bit {
@@ -89,6 +89,7 @@ use ThumbInstruction::*;
 
 impl ThumbInstruction {
     pub fn decode(instr: u16) -> Self {
+        // TODO: lookup table
         if software_interrupt::is_thumb_swi(instr) {
             SoftwareInterrupt(software_interrupt::parse(instr))
         } else if unconditional_branch::is_unconditional_branch(instr) {
@@ -341,6 +342,21 @@ impl Display for RegisterName3Bit {
     }
 }
 
+impl From<RegisterName3Bit> for RegisterName {
+    fn from(reg: RegisterName3Bit) -> Self {
+        match reg {
+            RegisterName3Bit::R0 => RegisterName::R0,
+            RegisterName3Bit::R1 => RegisterName::R1,
+            RegisterName3Bit::R2 => RegisterName::R2,
+            RegisterName3Bit::R3 => RegisterName::R3,
+            RegisterName3Bit::R4 => RegisterName::R4,
+            RegisterName3Bit::R5 => RegisterName::R5,
+            RegisterName3Bit::R6 => RegisterName::R6,
+            RegisterName3Bit::R7 => RegisterName::R7,
+        }
+    }
+}
+
 impl From<u8> for RegisterName3Bit {
     fn from(value: u8) -> Self {
         use RegisterName3Bit::*;
@@ -440,11 +456,21 @@ pub mod unconditional_branch {
         extracted_format == unconditional_branch_format
     }
 
+    // TODO: Unify interface for offsets (i.e. remove `offset_get` from other op, or add it here also)
     #[bitfield(bits = 11)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq, BitfieldSpecifier)]
     /// Two's complement 12-bit signed PC relative offset that is 2-byte aligned (i.e. bit 0 is 0)
     pub struct Offset11 {
         value: B11,
+    }
+
+    impl Offset11 {
+        pub fn val(&self) -> i16 {
+            let mask = 1 << (11 - 1) as i16;
+            let sign_extended = (self.value() as i16 ^ mask) - mask;
+            // Offset is half-word aligned, so to recontruct shift left by 1
+            sign_extended << 1
+        }
     }
 
     impl From<i16> for Offset11 {
@@ -456,12 +482,9 @@ pub mod unconditional_branch {
 
     impl Display for Offset11 {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            let mask = 1 << (11 - 1) as i16;
-            let sign_extended = (self.value() as i16 ^ mask) - mask;
             // PC is two instructions ahead, so to recontruct add 2 * 2
-            // Offset is half-word aligned, so to recontruct shift left by 1
-            let val = (sign_extended << 1) + (THUMB_INSTR_SIZE_BYTES * 2) as i16;
-            write!(f, "{}", val)
+            let val = self.val() + THUMB_INSTR_SIZE_BYTES as i16 * 2;
+            write!(f, "{val}")
         }
     }
 
@@ -504,6 +527,12 @@ pub mod conditional_branch {
     /// Two's complement 12-bit signed PC relative offset that is 2-byte aligned (i.e. bit 0 is 0)
     pub struct Offset8 {
         value: B8,
+    }
+
+    impl From<Offset8> for i16 {
+        fn from(offset: Offset8) -> Self {
+            offset.value() as i16
+        }
     }
 
     impl From<i8> for Offset8 {
@@ -1305,6 +1334,8 @@ pub mod add_sub {
 }
 
 pub mod move_shifted_reg {
+    use crate::arm::ShiftType;
+
     use super::*;
 
     pub fn is_move_shifted_reg(opcode: u16) -> bool {
@@ -1320,6 +1351,16 @@ pub mod move_shifted_reg {
         Lsl,
         Lsr,
         Asr,
+    }
+
+    impl From<ShiftOp> for ShiftType {
+        fn from(sh_op: ShiftOp) -> Self {
+            match sh_op {
+                ShiftOp::Lsl => ShiftType::LogicalLeft,
+                ShiftOp::Lsr => ShiftType::LogicalRight,
+                ShiftOp::Asr => ShiftType::ArithmeticRight,
+            }
+        }
     }
 
     #[bitfield(bits = 16)]

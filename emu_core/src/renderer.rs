@@ -108,6 +108,13 @@ impl Renderer {
 
         let (bg_tileset_and_map, obj_tiles) = vram.as_buffer().split_at(BG_MAP_TILE_SIZE);
 
+        // TODO:
+        // 1. Get OBJs
+        // 2. Determine prio of all entities together, render will happen in opposite order
+        // 3. Determine windows, which BGs & OBJs are inside/outside
+        // 4. OBJ rotation/scale
+        // 5. Special effects/mosaic
+
         for (bg_nr, bg) in bg_control_regs.iter().enumerate() {
             if visible_bgs[bg_nr] == 0 {
                 // This background is not visible, so don't render
@@ -118,14 +125,13 @@ impl Renderer {
             let screen_start = bg.screen_base_block() as usize * SCREEN_BLOCK_SIZE;
             let screen_end = screen_start + bg_tile_map_size;
             let (bg_scroll_x, bg_scroll_y) = {
-                let bg_scroll = bg_scroll_regs[bg_nr];
+                let bg_scroll = &bg_scroll_regs[bg_nr];
                 (bg_scroll.x_offset(), bg_scroll.y_offset())
             };
             let bg_tile_map = &bg_tileset_and_map[screen_start..screen_end];
 
             for entry in bg_tile_map.chunks(TILE_MAP_ENTRY_SIZE) {
                 let entry = TextBgTileMapEntry::from_bytes(entry.try_into().unwrap());
-                // entry.
             }
             // TODO: Figure out how color palettes work?
             // TODO: Figure out how windowing works?

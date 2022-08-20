@@ -1,6 +1,6 @@
 use crate::{
     bus::{Bus, HALFWORD, WORD},
-    cpu::Cycles,
+    cycles::Cycles,
     memcontroller::{shared, Shared, KB},
 };
 
@@ -51,12 +51,20 @@ impl<const MEMSIZE: usize, const ACCESS_CYCLES: usize, const BUSWIDTH: usize> Bu
     }
 }
 
+// Different RAM areas are defined as
+// Ram< `memory size`, `access cycles`, `access width`>
+
+/// External working RAM
 pub type EwRam = Ram<{ 256 * KB }, 3, HALFWORD>;
 
+/// Internal working RAM
 pub type IwRam = Ram<{ 32 * KB }, 1, WORD>;
 
+/// Palette RAM
 pub type PaletteRam = Ram<{ KB }, 1, HALFWORD>;
 
+/// Video RAM
 pub type Vram = Ram<{ 96 * KB }, 1, HALFWORD>;
 
+/// Object Attribute RAM
 pub type Oam = Ram<{ KB }, 1, WORD>;

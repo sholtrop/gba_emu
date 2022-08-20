@@ -1,10 +1,10 @@
-use std::{borrow::BorrowMut, cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     bios::Bios,
     bus::{Bus, BYTE, HALFWORD, WORD},
     cartridge::Cartridge,
-    cpu::Cycles,
+    cycles::Cycles,
     emulator::EmulatorMemory,
     mmio::IoRam,
     ram::{EwRam, IwRam, Oam, PaletteRam, Vram},

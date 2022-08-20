@@ -3,7 +3,7 @@ use std::mem::size_of;
 
 use crate::{
     bus::Bus,
-    cpu::Cycles,
+    cycles::Cycles,
     memcontroller::{shared, Shared},
 };
 

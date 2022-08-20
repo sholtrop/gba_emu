@@ -1,4 +1,4 @@
-use crate::{bus::Bus, cpu::Cycles};
+use crate::{bus::Bus, cycles::Cycles};
 
 // TODO: write
 #[derive(Debug, Clone)]

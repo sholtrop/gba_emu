@@ -3,6 +3,7 @@ mod bios;
 mod bus;
 mod cartridge;
 mod cpu;
+mod cycles;
 mod display;
 mod emulator;
 mod instruction;

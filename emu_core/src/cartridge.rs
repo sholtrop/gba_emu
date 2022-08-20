@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::bus::{Bus, BYTE, HALFWORD, WORD};
-use crate::cpu::Cycles;
+use crate::cycles::Cycles;
 use crate::memcontroller::CART_SRAM_START;
 
 const CARTRIDGE_HEADER_SIZE: usize = 192;

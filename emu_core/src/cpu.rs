@@ -1,5 +1,7 @@
 use crate::alu::AluResult;
-use crate::bus::{Bus, WORD};
+use crate::bus::{Bus, HALFWORD, WORD};
+use crate::cycles::Cycles;
+use crate::instruction;
 use crate::registers::psr::ProcessorMode::{self, *};
 use crate::{
     alu::{Alu, AluSetCpsr},
@@ -7,13 +9,15 @@ use crate::{
     memcontroller::MemoryController,
     registers::CpuRegisters,
 };
+use armv4t_decoder::arm::block_data_transfer::RegisterList;
 use armv4t_decoder::arm::data_processing::OpCode;
 use armv4t_decoder::arm::halfword_data_transfer::ShType;
-use armv4t_decoder::thumb;
+use armv4t_decoder::thumb::load_address::LoadSource;
+use armv4t_decoder::thumb::THUMB_INSTR_SIZE_BYTES;
+use armv4t_decoder::{arm, thumb};
 use armv4t_decoder::{arm::*, common::*, thumb::ThumbInstruction};
-use std::ops::{Add, AddAssign, Mul, Sub, SubAssign};
-use std::{cell::RefCell, rc::Rc};
 
+pub const FRAME_POINTER: RegisterName = RegisterName::R11;
 pub const STACK_POINTER: RegisterName = RegisterName::R13;
 pub const LINK_REGISTER: RegisterName = RegisterName::R14;
 pub const PROGRAM_COUNTER: RegisterName = RegisterName::R15;
@@ -37,61 +41,23 @@ pub enum HardwareInterrupt {
     GamePak = 1 << 13,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct Cycles(pub u32);
-
-impl Add for Cycles {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Self(self.0 + rhs.0)
-    }
+pub struct CpuPipeline {
+    decode: u32,
+    execute: Armv4tInstruction,
 }
 
-impl AddAssign for Cycles {
-    fn add_assign(&mut self, rhs: Self) {
-        self.0 += rhs.0;
-    }
-}
-
-impl Sub for Cycles {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        Self(self.0 - rhs.0)
-    }
-}
-
-impl SubAssign for Cycles {
-    fn sub_assign(&mut self, rhs: Self) {
-        self.0 -= rhs.0
-    }
-}
-
-impl Mul<u32> for Cycles {
-    type Output = Self;
-
-    fn mul(self, rhs: u32) -> Self::Output {
-        Self(self.0 * rhs)
-    }
-}
-
-impl PartialEq for Cycles {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl PartialOrd for Cycles {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.0.partial_cmp(&other.0)
+impl CpuPipeline {
+    pub fn flush(&mut self) {
+        self.decode = instruction::NOP_ARM;
+        self.execute = Armv4tInstruction::nop_arm();
     }
 }
 
 pub struct Cpu {
     registers: CpuRegisters,
     mem_controller: MemoryController,
-    current_tick_cycles: Cycles,
+    // current_tick_cycles: Cycles,
+    pipeline: CpuPipeline,
 }
 
 impl Cpu {
@@ -102,16 +68,23 @@ impl Cpu {
         Self {
             registers: CpuRegisters::new(pc),
             mem_controller: memory,
-            current_tick_cycles: Cycles(0),
+            // current_tick_cycles: Cycles(0),
+            pipeline: CpuPipeline {
+                decode: instruction::NOP_ARM,
+                execute: Armv4tInstruction::nop_arm(),
+            },
         }
     }
 
     pub fn tick(&mut self) -> Cycles {
-        self.current_tick_cycles = Cycles(0);
-        let instr = self.fetch();
-        let op = self.decode(instr);
-        self.execute(op);
-        self.current_tick_cycles
+        let fetched_instr = self.fetch();
+        let decoded_instr = self.decode();
+        let cycles = self.execute();
+        self.pipeline = CpuPipeline {
+            decode: fetched_instr,
+            execute: decoded_instr,
+        };
+        cycles
     }
 
     pub fn handle_interrupt(&mut self, interrupt: HardwareInterrupt) -> Cycles {
@@ -137,7 +110,7 @@ impl Cpu {
     fn fetch(&mut self) -> u32 {
         let pc = self.registers.read(PROGRAM_COUNTER);
         let pc_offset;
-        let (instr, cycles) = match self.registers.get_instr_mode() {
+        let (instr, _) = match self.registers.get_instr_mode() {
             InstructionMode::Thumb => {
                 pc_offset = 2;
 
@@ -150,43 +123,40 @@ impl Cpu {
             }
         };
         self.pc_add_offset(pc_offset);
-        self.current_tick_cycles += cycles;
+        // TODO: Cycles for fetch/decode, or just execute?
+        // self.current_tick_cycles += cycles;
         instr
     }
 
-    fn decode(&self, instr: u32) -> Armv4tInstruction {
+    fn decode(&self) -> Armv4tInstruction {
         use Armv4tInstruction::*;
+        let instr = self.pipeline.decode;
         match self.registers.get_instr_mode() {
             InstructionMode::Thumb => Thumb(armv4t_decoder::decode_thumb((instr & 0xFFFF) as u16)),
             InstructionMode::Arm => Arm(armv4t_decoder::decode_arm(instr)),
         }
     }
 
-    fn execute(&mut self, op: Armv4tInstruction) {
-        let cycles = match op {
+    fn execute(&mut self) -> Cycles {
+        let op = self.pipeline.execute;
+        match op {
             Armv4tInstruction::Arm(op) => self.exec_arm(op),
             Armv4tInstruction::Thumb(op) => self.exec_thumb(op),
-        };
-        self.current_tick_cycles += cycles;
+        }
     }
 
     /// Add `offset` to the program counter. Returns the value of the old program counter, before the offset was added.
     fn pc_add_offset(&mut self, offset: i32) -> u32 {
-        let pc = self.registers.read(PROGRAM_COUNTER);
-        if offset < 0 {
-            self.registers
-                .write(PROGRAM_COUNTER, pc - offset.abs() as u32);
-        } else {
-            self.registers.write(PROGRAM_COUNTER, pc + offset as u32);
-        }
-        pc
+        let pc = self.registers.read(PROGRAM_COUNTER) as i32;
+        self.registers.write(PROGRAM_COUNTER, (pc + offset) as u32);
+        pc as u32
     }
 
     fn exec_arm(&mut self, instr: ArmInstruction) -> Cycles {
         use armv4t_decoder::arm::ArmInstruction::*;
         log::debug!("{}", instr);
         let cond = instr.condition();
-        if !self.arm_cond_satisfied(cond) {
+        if !self.cond_satisfied(cond) {
             log::debug!("Instruction skipped - condition not satisfied");
             return Cycles(1);
         }
@@ -208,7 +178,7 @@ impl Cpu {
         }
     }
 
-    fn arm_cond_satisfied(&self, cond: Condition) -> bool {
+    fn cond_satisfied(&self, cond: Condition) -> bool {
         use Condition::*;
         let cpsr = self.registers.read_cpsr();
         match cond {
@@ -238,33 +208,15 @@ impl Cpu {
             SoftwareInterrupt(op) => {
                 todo!()
             }
-            UnconditionalBranch(op) => {
-                todo!()
-            }
-            MultipleLoadstore(op) => {
-                todo!()
-            }
-            LongBranchWithLink(op) => {
-                todo!()
-            }
-            PushPopRegister(op) => {
-                todo!()
-            }
-            LoadStoreHalfWord(op) => {
-                todo!()
-            }
-            MoveShiftedRegister(op) => {
-                todo!()
-            }
-            SpRelativeLoadStore(op) => {
-                todo!()
-            }
-            LoadAddress(op) => {
-                todo!()
-            }
-            ConditionalBranch(op) => {
-                todo!()
-            }
+            UnconditionalBranch(op) => self.thumb_unconditional_branch(op),
+            MultipleLoadstore(op) => self.thumb_multiple_load_store(op),
+            LongBranchWithLink(op) => self.thumb_long_branch_with_link(op),
+            PushPopRegister(op) => self.thumb_push_pop_regs(op),
+            LoadStoreHalfWord(op) => self.thumb_load_store_halfword(op),
+            MoveShiftedRegister(op) => self.thumb_move_shifted_reg(op),
+            SpRelativeLoadStore(op) => self.thumb_sp_relative_load_store(op),
+            LoadAddress(op) => self.thumb_load_address(op),
+            ConditionalBranch(op) => self.thumb_cond_branch(op),
             LoadStoreImmOffset(op) => {
                 todo!()
             }
@@ -304,9 +256,174 @@ impl Cpu {
         Cycles(1)
     }
 
+    fn thumb_unconditional_branch(&mut self, op: thumb::unconditional_branch::Op) -> Cycles {
+        const INSTR_SIZE: i16 = HALFWORD as i16;
+        let offset = op.offset11().val();
+        // `offset` will be encoded with -4 (two instructions behind)
+        // but since we don't implement pipelining, CPU will only be one instruction ahead.
+        // Correct this by adding one instruction (= 2) to the branch offset.
+        let offset = offset + INSTR_SIZE;
+        self.pc_add_offset(offset as i32);
+        // TODO: Make 2S + 1N
+        Cycles(12)
+    }
+
+    fn thumb_multiple_load_store(&mut self, op: thumb::multiple_load_store::Op) -> Cycles {
+        self.arm_block_data_transfer(
+            arm::block_data_transfer::Op::new()
+                .with_base_reg(op.base_reg().into())
+                .with_load_store(op.load_or_store())
+                .with_write_back(true)
+                .with_pre_post_indexing(PreOrPostIndexing::Post)
+                .with_up_or_down(UpOrDown::Up)
+                .with_regs(op.regs() as u16)
+                .with_psr_force_user(false),
+        )
+    }
+
+    fn thumb_long_branch_with_link(&mut self, op: thumb::long_branch_with_link::Op) -> Cycles {
+        use thumb::long_branch_with_link::OffsetHighLow::*;
+
+        match op.off_hi_lo() {
+            High => {
+                let offset = (op.offset11() as i32) << 12;
+                let pc = self.registers.read(PROGRAM_COUNTER) as i32;
+                self.registers
+                    .write(LINK_REGISTER, (pc as i32).wrapping_add(offset) as u32);
+                self.pipeline.flush();
+                // TODO: Make cycls 2S + 1N
+                Cycles(7)
+            }
+            Low => {
+                let offset = (op.offset11() as i32) << 1;
+                let lr = self.registers.read(LINK_REGISTER);
+                let old_pc = self.registers.read(PROGRAM_COUNTER);
+                let new_pc = ((lr & !1) as i32).wrapping_add(offset) as u32;
+                let new_lr = (old_pc - THUMB_INSTR_SIZE_BYTES as u32) | 1;
+                self.registers.write(PROGRAM_COUNTER, new_pc);
+                self.registers.write(LINK_REGISTER, new_lr);
+                // TODO: make cycles 1S
+                Cycles(3)
+            }
+        }
+    }
+
+    fn thumb_push_pop_regs(&mut self, op: thumb::push_pop_regs::Op) -> Cycles {
+        use LoadOrStore::*;
+        use PreOrPostIndexing::*;
+        use RegisterName::*;
+        use UpOrDown::*;
+
+        let mut reg_list = op.regs() as u16;
+
+        let arm_op = arm::block_data_transfer::Op::new()
+            .with_base_reg(R13)
+            .with_psr_force_user(false)
+            .with_write_back(true);
+
+        let arm_op = match op.load_or_store() {
+            Load => {
+                // Add link register to the register list when loading
+                if op.load_pc_store_lr() {
+                    reg_list |= 1 << LINK_REGISTER as u16;
+                }
+                arm_op
+                    .with_load_store(Load)
+                    .with_pre_post_indexing(Post)
+                    .with_up_or_down(Up)
+                    .with_regs(reg_list)
+            }
+            Store => {
+                // Add program counter to the register list when storing
+                if op.load_pc_store_lr() {
+                    reg_list |= 1 << PROGRAM_COUNTER as u16;
+                }
+                arm_op
+                    .with_load_store(Store)
+                    .with_pre_post_indexing(Pre)
+                    .with_up_or_down(Down)
+                    .with_regs(reg_list)
+            }
+        };
+
+        self.arm_block_data_transfer(arm_op)
+    }
+
+    fn thumb_load_store_halfword(&mut self, op: thumb::load_store_half_word::Op) -> Cycles {
+        use arm::halfword_data_transfer::ShType::*;
+        let arm_op = arm::halfword_data_transfer::Op::new()
+            .with_reg_dest(op.dest_reg().into())
+            .with_base_reg(op.base_reg().into())
+            .with_load_store(op.load_or_store())
+            .with_is_imm_offset(true)
+            .with_imm_offset(op.offset())
+            .with_sh_type(UnsignedHalfwords)
+            .with_up_or_down(UpOrDown::Up)
+            .with_pre_post_indexing(PreOrPostIndexing::Pre)
+            .with_write_back(false);
+        self.arm_halfword_data_transfer(arm_op)
+    }
+
+    fn thumb_move_shifted_reg(&mut self, op: thumb::move_shifted_reg::Op) -> Cycles {
+        let arm_op = arm::data_processing::Op::new()
+            .with_op(OpCode::Mov)
+            .with_dest_reg(op.dest_reg().into())
+            .with_operand2(
+                ShiftRegister::new()
+                    .with_reg(op.src_reg().into())
+                    .with_shift_amt_in_reg(false)
+                    .with_shift_type(op.op().into())
+                    .with_shift_amt(op.offset().value())
+                    .into(),
+            );
+        self.arm_data_processing(arm_op)
+    }
+
+    fn thumb_sp_relative_load_store(&mut self, op: thumb::sp_relative_load_store::Op) -> Cycles {
+        let arm_op = arm::single_data_transfer::Op::new()
+            .with_dest_reg(op.dest_reg().into())
+            .with_load_store(op.load_or_store())
+            .with_base_reg(STACK_POINTER)
+            .with_is_reg_offset(false)
+            .with_up_or_down(UpOrDown::Up)
+            .with_pre_post_indexing(PreOrPostIndexing::Pre)
+            .with_byte_or_word(ByteOrWord::Word)
+            .with_write_back(false)
+            .with_offset(op.offset().into());
+
+        self.arm_single_data_transfer(arm_op)
+    }
+
+    fn thumb_load_address(&mut self, op: thumb::load_address::Op) -> Cycles {
+        use LoadSource::*;
+        let src_reg = match op.src() {
+            Sp => STACK_POINTER,
+            Pc => PROGRAM_COUNTER,
+        };
+        let arm_op = arm::data_processing::Op::new()
+            .with_dest_reg(op.dest_reg().into())
+            .with_is_imm_operand(true)
+            .with_op(OpCode::Add)
+            .with_operand1(src_reg)
+            .with_operand2(op.word8().value().into());
+        self.arm_data_processing(arm_op)
+    }
+
+    fn thumb_cond_branch(&mut self, op: thumb::conditional_branch::Op) -> Cycles {
+        let cond = op.condition();
+        if self.cond_satisfied(cond) {
+            let offset = i16::from(op.offset8());
+            self.pc_add_offset(offset as i32);
+            // TODO: make 2S + 1N
+            Cycles(12)
+        } else {
+            Cycles(1)
+        }
+    }
+
     fn arm_branch_and_exchange(&mut self, op: branch_and_exchange::Op) -> Cycles {
         let val = self.registers.read(op.rn());
-        let switch_to_thumb = val & 1 == 1;
+        let switch_to_thumb = (val & 1) == 1;
         self.registers.write(PROGRAM_COUNTER, val);
         if switch_to_thumb {
             self.registers.switch_instr_mode(InstructionMode::Thumb)
@@ -377,8 +494,8 @@ impl Cpu {
         // `offset` will be encoded with -8 (two instructions behind)
         // but since we don't implement pipelining, CPU will only be one instruction ahead.
         // Correct this by adding one instruction (= 4) to the branch offset.
-        const INSTR_SIZE: i32 = WORD as i32;
-        let offset = op.offset_get() + INSTR_SIZE;
+        // const INSTR_SIZE: i32 = WORD as i32;
+        let offset = op.offset_get();
         let old_pc = self.pc_add_offset(offset);
         if op.link() {
             // Link-reg contains address following the BL instruction
@@ -447,7 +564,7 @@ impl Cpu {
         // TODO: half-word aligned addresses need to be rotated into the reg
         let cycle_cost = match op.load_store() {
             Load => {
-                let dst = op.reg_dest();
+                let dst = op.dest_reg();
                 let (value, cycle_cost) = match op.byte_or_word() {
                     Byte => {
                         let (val, cycles) = self.mem_controller.read_byte(address);
@@ -459,7 +576,7 @@ impl Cpu {
                 cycle_cost
             }
             Store => {
-                let value = self.registers.read(op.reg_dest());
+                let value = self.registers.read(op.dest_reg());
                 match op.byte_or_word() {
                     Byte => self.mem_controller.write_byte(address, value as u8),
                     Word => self.mem_controller.write_le_word(address, value),
@@ -754,7 +871,10 @@ impl Cpu {
 mod tests {
     use super::*;
     use crate::{
-        cartridge::Cartridge, emulator::EmulatorMemory, memcontroller::CART_ROM_START,
+        cartridge::Cartridge,
+        emulator::EmulatorMemory,
+        instruction::{NOP_ARM, NOP_THUMB},
+        memcontroller::CART_ROM_START,
         registers::psr::DEFAULT_STACKPOINTER_USER,
     };
     use byteorder::{LittleEndian, WriteBytesExt};
@@ -768,6 +888,14 @@ mod tests {
         vec8
     }
 
+    fn vecu16_to_vecu8(vec16: Vec<u16>) -> Vec<u8> {
+        let mut vec8: Vec<u8> = vec![];
+        for i in vec16 {
+            vec8.write_u16::<LittleEndian>(i).unwrap();
+        }
+        vec8
+    }
+
     fn setup_cpu(start_memory: Vec<u8>) -> Cpu {
         let mut mem = EmulatorMemory::new();
         let mem_controller = MemoryController::new(&mem);
@@ -776,30 +904,34 @@ mod tests {
     }
 
     /// `expected_mem` is a vector of (address, value)
-    fn assert_memory_state_eq(mem: &MemoryController, expected_mem: &[(u32, u32)]) {
+    fn assert_memory_state_eq(
+        mem: &MemoryController,
+        expected_mem: &[(u32, u32)],
+        test_name: &str,
+    ) {
         for &(addr, expected_val) in expected_mem {
             let (actual_val, _) = mem.read_le_word(addr);
             assert_eq!(
                 actual_val, expected_val,
-                "\n{:#X} - Expected {} ({:#X}), but actual was {} ({:#X})",
-                addr, expected_val, expected_val, actual_val, actual_val
+                "\n|{}| {:#X} - Expected {} ({:#X}), but actual was {} ({:#X})",
+                test_name, addr, expected_val, expected_val, actual_val, actual_val
             );
         }
     }
 
-    fn assert_cpu_state_eq(cpu: &Cpu, expected_regs: &[(RegisterName, u32)]) {
+    fn assert_cpu_state_eq(cpu: &Cpu, expected_regs: &[(RegisterName, u32)], test_name: &str) {
         for &(reg, expected_val) in expected_regs {
             let actual_val = cpu.registers.read(reg);
             assert_eq!(
                 actual_val, expected_val,
-                "\n{} - Expected {} ({:#X}), but actual was {} ({:#X})",
-                reg, expected_val, expected_val, actual_val, actual_val
+                "\n|{}| {} - Expected {} ({:#X}), but actual was {} ({:#X})",
+                test_name, reg, expected_val, expected_val, actual_val, actual_val
             );
         }
     }
 
     #[test]
-    fn test_ldm_stm() {
+    fn test_arm_ldm_stm() {
         let mut cpu = setup_cpu(vecu32_to_vecu8(vec![
             0xe3a00001, // mov r0, #1
             0xe3a01002, // mov r1, #2
@@ -807,15 +939,20 @@ mod tests {
             0xe3a00003, // mov r0, #3
             0xe3a01004, // mov r1, #4
             0xe8bd8003, // ldmfd sp!, {r0-r1, pc}
+            NOP_ARM, NOP_ARM,
         ]));
+
+        // Pipeline
+        cpu.tick();
+        cpu.tick();
 
         // mov r0, #1
         cpu.tick();
-        assert_cpu_state_eq(&cpu, &[(R0, 1)]);
+        assert_cpu_state_eq(&cpu, &[(R0, 1)], "test_ldm_stm_1");
 
         // mov r1, #2
         cpu.tick();
-        assert_cpu_state_eq(&cpu, &[(R1, 2)]);
+        assert_cpu_state_eq(&cpu, &[(R1, 2)], "test_ldm_stm_2");
 
         // stmfd sp!, {r0-r1, pc}
         cpu.tick();
@@ -827,16 +964,21 @@ mod tests {
                 (DEFAULT_STACKPOINTER_USER - 8, 2),
                 (DEFAULT_STACKPOINTER_USER - 12, 1),
             ],
+            "test_ldm_stm_3",
         );
-        assert_cpu_state_eq(&cpu, &[(STACK_POINTER, DEFAULT_STACKPOINTER_USER - 12)]);
+        assert_cpu_state_eq(
+            &cpu,
+            &[(STACK_POINTER, DEFAULT_STACKPOINTER_USER - 12)],
+            "test_ldm_stm_4",
+        );
 
         // mov r0, #3
         cpu.tick();
-        assert_cpu_state_eq(&cpu, &[(R0, 3)]);
+        assert_cpu_state_eq(&cpu, &[(R0, 3)], "test_ldm_stm_5");
 
         // mov r1, #4
         cpu.tick();
-        assert_cpu_state_eq(&cpu, &[(R1, 4)]);
+        assert_cpu_state_eq(&cpu, &[(R1, 4)], "test_ldm_stm_6");
 
         // ldmfd sp!, {r0-r1, pc}
         cpu.tick();
@@ -848,10 +990,51 @@ mod tests {
                 (DEFAULT_STACKPOINTER_USER - 8, 2),
                 (DEFAULT_STACKPOINTER_USER - 12, 1),
             ],
+            "test_ldm_stm_7",
         );
         assert_cpu_state_eq(
             &cpu,
             &[(STACK_POINTER, DEFAULT_STACKPOINTER_USER), (R0, 1), (R1, 2)],
+            "test_ldm_stm_8",
+        );
+    }
+
+    #[test]
+    fn test_thumb_push_pop_regs() {
+        let mut cpu = setup_cpu(vecu16_to_vecu8(vec![
+            0x2001, // movs	r0, #1
+            0x2102, // movs	r1, #2
+            0x2203, // movs	r2, #3
+            0x2304, // movs	r3, #4
+            0x2405, // movs	r4, #5
+            0xb51f, // push	{r0, r1, r2, r3, r4, lr}
+            0x2000, // movs	r0, #0
+            0x2100, // movs	r1, #0
+            0x2200, // movs	r2, #0
+            0x2300, // movs	r3, #0
+            0x2400, // movs	r4, #0
+            0xbd1f, // pop	{r0, r1, r2, r3, r4, pc}
+            NOP_THUMB, NOP_THUMB,
+        ]));
+        cpu.registers.switch_instr_mode(InstructionMode::Thumb);
+
+        for _ in 0..7 {
+            // Pipeline1, Pipeline2, movs r0..r5
+            cpu.tick();
+        }
+
+        // push {r0, r1, r2, r3, r4, lr}
+        cpu.tick();
+        assert_memory_state_eq(
+            &cpu.mem_controller,
+            &[
+                (DEFAULT_STACKPOINTER_USER, 0x1),
+                (DEFAULT_STACKPOINTER_USER - 2, 0x2),
+                (DEFAULT_STACKPOINTER_USER - 4, 0x3),
+                (DEFAULT_STACKPOINTER_USER - 6, 0x4),
+                (DEFAULT_STACKPOINTER_USER - 8, 0x5),
+            ],
+            "test_push_pop_regs_1",
         );
     }
 

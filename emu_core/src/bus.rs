@@ -1,7 +1,7 @@
 // TODO:
 // Split memory into a MemoryController that then accesses several memories (RAM, ROM, cartridge, hardware)
 
-use crate::cpu::Cycles;
+use crate::cycles::Cycles;
 
 pub const BYTE: usize = 1;
 pub const HALFWORD: usize = 2;

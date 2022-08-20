@@ -138,7 +138,7 @@ impl ArmInstruction {
                 use PreOrPostIndexing::*;
                 use UpOrDown::*;
 
-                let rd = Some(op.reg_dest().to_string());
+                let rd = Some(op.dest_reg().to_string());
                 let rn = op.base_reg();
                 let wb = if op.write_back() { "!" } else { "" };
                 let imm = op.offset().as_imm();
@@ -1006,6 +1006,10 @@ pub mod block_data_transfer {
     pub struct RegisterList(u16);
 
     impl RegisterList {
+        pub fn new(list: u16) -> Self {
+            Self(list)
+        }
+
         pub fn to_vec(self) -> Vec<RegisterName> {
             self.0
                 .view_bits()
@@ -1218,7 +1222,7 @@ pub mod single_data_transfer {
     pub struct Op {
         /// `offset` is either a [ShiftRegister] or [u16] (12-bit immediate)
         pub offset: Operand12Bit,
-        pub reg_dest: RegisterName,
+        pub dest_reg: RegisterName,
         pub base_reg: RegisterName,
         pub load_store: LoadOrStore,
         pub write_back: bool,
@@ -1234,7 +1238,7 @@ pub mod single_data_transfer {
     impl PartialEq for Op {
         fn eq(&self, other: &Self) -> bool {
             self.offset() == other.offset()
-                && self.reg_dest() == other.reg_dest()
+                && self.dest_reg() == other.dest_reg()
                 && self.base_reg() == other.base_reg()
                 && self.load_store() == other.load_store()
                 && self.write_back() == other.write_back()
@@ -1738,7 +1742,7 @@ mod tests {
                 .with_write_back(true)
                 .with_pre_post_indexing(PreOrPostIndexing::Post)
                 .with_byte_or_word(ByteOrWord::Byte)
-                .with_reg_dest(R0)
+                .with_dest_reg(R0)
                 .with_base_reg(R1)
                 .with_is_reg_offset(true)
                 .with_offset(ShiftRegister::new()
