@@ -279,10 +279,10 @@ impl ArmInstruction {
             Undefined(_) => "undefined".into(),
             SingleDataSwap(_) => "swp".into(),
             HalfwordDataTransfer(op) => match (op.load_store(), op.sh_type()) {
-                (Load, UnsignedHalfwords) => "ldrh".into(),
-                (Load, SignedHalfwords) => "ldrsh".into(),
+                (Load, UnsignedHalfword) => "ldrh".into(),
+                (Load, SignedHalfword) => "ldrsh".into(),
                 (Load, SignedByte) => "ldrsb".into(),
-                (Store, UnsignedHalfwords) => "strh".into(),
+                (Store, UnsignedHalfword) => "strh".into(),
                 _ => unreachable!(),
             },
         }
@@ -1311,9 +1311,9 @@ pub mod halfword_data_transfer {
     #[bits = 2]
     pub enum ShType {
         Swp,
-        UnsignedHalfwords,
+        UnsignedHalfword,
         SignedByte,
-        SignedHalfwords,
+        SignedHalfword,
     }
 
     #[bitfield(bits = 32)]
@@ -1801,7 +1801,7 @@ mod tests {
                 .with_up_or_down(Up)
                 .with_write_back(false)
                 .with_pre_post_indexing(PreOrPostIndexing::Pre)
-                .with_sh_type(UnsignedHalfwords)
+                .with_sh_type(UnsignedHalfword)
                 .with_reg_dest(R1)
                 .with_base_reg(R2)
                 .with_is_imm_offset(true)
@@ -1817,7 +1817,7 @@ mod tests {
                 .with_up_or_down(Down)
                 .with_write_back(false)
                 .with_pre_post_indexing(PreOrPostIndexing::Pre)
-                .with_sh_type(UnsignedHalfwords)
+                .with_sh_type(UnsignedHalfword)
                 .with_reg_dest(R3)
                 .with_base_reg(R2)
                 .with_is_imm_offset(false)

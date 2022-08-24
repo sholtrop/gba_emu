@@ -22,7 +22,12 @@ pub enum AluSetCpsr<'a> {
 pub struct Alu {}
 
 impl Alu {
+    pub fn new() -> Self {
+        Self {}
+    }
+
     pub fn exec_shift(
+        &self,
         number: u32,
         shift_type: ShiftType,
         shift_amount: u8,
@@ -131,7 +136,7 @@ impl Alu {
 
     /// Calculates `lhs * rhs + acc`. If no `acc` should be added, simply pass in 0.
     /// Sets the conditions of the CPSR if `cpsr` is [AluSetCpsr::Alter].
-    pub fn exec_mul(lhs: u32, rhs: u32, acc: u32, cpsr: AluSetCpsr) -> u32 {
+    pub fn exec_mul(&self, lhs: u32, rhs: u32, acc: u32, cpsr: AluSetCpsr) -> u32 {
         let mut res = (lhs as u64) * (rhs as u64);
         res += acc as u64;
         if let AluSetCpsr::Alter(cpsr) = cpsr {
@@ -145,6 +150,7 @@ impl Alu {
     /// Sets the conditions of the CPSR if `cpsr` is [AluSetCpsr::Alter].
     /// Returns a 64-bit result as two 32-bit numbers: (hi_bits, low_bits)
     pub fn exec_mul_long(
+        &self,
         lhs: u32,
         rhs: u32,
         acc: u64,
@@ -167,7 +173,7 @@ impl Alu {
     /// Executes the given `op` on `lhs` and `rhs`, using the conditions given in the `cpsr` for operations that require it.
     /// If `cpsr` is [AluSetCpsr::Alter], the condition codes in the given [ProgramStatusRegister] will be altered based on the result of the calculation.
     /// If the operation to be performed is unary, only `rhs` is used and the value of `lhs` can be chosen freely (but is ignored).
-    pub fn exec_op(op: OpCode, lhs: u32, rhs: u32, cpsr: AluSetCpsr) -> AluResult {
+    pub fn exec_op(&self, op: OpCode, lhs: u32, rhs: u32, cpsr: AluSetCpsr) -> AluResult {
         use OpCode::*;
         let mut write_back = true;
         let (old_carry, old_overflow) = match cpsr {
@@ -190,40 +196,40 @@ impl Alu {
             Sub => {
                 let (val, carry) = lhs.overflowing_sub(rhs);
                 new_carry = carry;
-                new_overflow = Alu::set_overflow_bit_sub(lhs, rhs, val);
+                new_overflow = self.set_overflow_bit_sub(lhs, rhs, val);
                 val
             }
             Rsb => {
                 let (val, carry) = rhs.overflowing_sub(lhs);
                 new_carry = carry;
-                new_overflow = Alu::set_overflow_bit_sub(lhs, rhs, val);
+                new_overflow = self.set_overflow_bit_sub(lhs, rhs, val);
                 val
             }
             Add => {
                 let (val, carry) = lhs.overflowing_add(rhs);
                 new_carry = carry;
-                new_overflow = Alu::set_overflow_bit_add(lhs, rhs, val);
+                new_overflow = self.set_overflow_bit_add(lhs, rhs, val);
                 val
             }
             Adc => {
                 let val = lhs.wrapping_add(rhs);
                 let (val, carry) = val.overflowing_add(old_carry);
                 new_carry = carry;
-                new_overflow = Alu::set_overflow_bit_add(lhs, rhs, val);
+                new_overflow = self.set_overflow_bit_add(lhs, rhs, val);
                 val
             }
             Sbc => {
                 let val = lhs.wrapping_sub(rhs);
                 let (val, carry) = val.overflowing_add(old_carry - 1);
                 new_carry = carry;
-                new_overflow = Alu::set_overflow_bit_add(lhs, rhs, val);
+                new_overflow = self.set_overflow_bit_add(lhs, rhs, val);
                 val
             }
             Rsc => {
                 let val = rhs.wrapping_sub(lhs);
                 let (val, carry) = val.overflowing_add(old_carry - 1);
                 new_carry = carry;
-                new_overflow = Alu::set_overflow_bit_add(lhs, rhs, val);
+                new_overflow = self.set_overflow_bit_add(lhs, rhs, val);
                 val
             }
             Tst => {
@@ -238,14 +244,14 @@ impl Alu {
                 write_back = false;
                 let (val, carry) = lhs.overflowing_sub(rhs);
                 new_carry = carry;
-                new_overflow = Alu::set_overflow_bit_sub(lhs, rhs, val);
+                new_overflow = self.set_overflow_bit_sub(lhs, rhs, val);
                 val
             }
             Cmn => {
                 write_back = false;
                 let (val, carry) = lhs.overflowing_add(rhs);
                 new_carry = carry;
-                new_overflow = Alu::set_overflow_bit_add(lhs, rhs, val);
+                new_overflow = self.set_overflow_bit_add(lhs, rhs, val);
                 val
             }
             Orr => lhs | rhs,
@@ -264,7 +270,7 @@ impl Alu {
         AluResult { value, write_back }
     }
 
-    fn set_overflow_bit_add(lhs: u32, rhs: u32, result: u32) -> bool {
+    fn set_overflow_bit_add(&self, lhs: u32, rhs: u32, result: u32) -> bool {
         let sign_lhs = lhs >> 31;
         let sign_rhs = rhs >> 31;
         let sign_res = result >> 31;
@@ -275,7 +281,7 @@ impl Alu {
         case1 || case2
     }
 
-    fn set_overflow_bit_sub(lhs: u32, rhs: u32, result: u32) -> bool {
+    fn set_overflow_bit_sub(&self, lhs: u32, rhs: u32, result: u32) -> bool {
         let sign_lhs = lhs >> 31;
         let sign_rhs = rhs >> 31;
         let sign_res = result >> 31;
@@ -309,8 +315,9 @@ mod tests {
             let mut cpsr = ProgramStatusRegister::new()
                 .with_overflow_condition(false)
                 .with_cbe_condition(false);
+            let alu = Alu::new();
             let AluResult { value, write_back } =
-                Alu::exec_op(OpCode::Add, lhs, rhs, AluSetCpsr::Alter(&mut cpsr));
+                alu.exec_op(OpCode::Add, lhs, rhs, AluSetCpsr::Alter(&mut cpsr));
             assert_eq!(
                 value, result,
                 "Case {}. Value was {} but expected {}",
@@ -362,8 +369,9 @@ mod tests {
             let mut cpsr = ProgramStatusRegister::new()
                 .with_overflow_condition(false)
                 .with_cbe_condition(false);
+            let alu = Alu::new();
             let AluResult { value, write_back } =
-                Alu::exec_op(OpCode::Sub, lhs, rhs, AluSetCpsr::Alter(&mut cpsr));
+                alu.exec_op(OpCode::Sub, lhs, rhs, AluSetCpsr::Alter(&mut cpsr));
             assert_eq!(
                 value, result,
                 "Case {}. Value was {} but expected {}",
@@ -394,7 +402,8 @@ mod tests {
     fn test_alu_lsl_by_32() {
         let mut cpsr = ProgramStatusRegister::default();
         let number = 0b1;
-        let result = Alu::exec_shift(
+        let alu = Alu::new();
+        let result = alu.exec_shift(
             number,
             ShiftType::LogicalLeft,
             32,
@@ -409,7 +418,8 @@ mod tests {
     fn test_alu_lsl_by_more_than_32() {
         let mut cpsr = ProgramStatusRegister::default();
         let number = u32::MAX;
-        let result = Alu::exec_shift(
+        let alu = Alu::new();
+        let result = alu.exec_shift(
             number,
             ShiftType::LogicalLeft,
             33,
@@ -424,7 +434,8 @@ mod tests {
     fn test_alu_lsr_by_32() {
         let mut cpsr = ProgramStatusRegister::default();
         let number = 1 << 31;
-        let result = Alu::exec_shift(
+        let alu = Alu::new();
+        let result = alu.exec_shift(
             number,
             ShiftType::LogicalRight,
             0,
@@ -439,7 +450,8 @@ mod tests {
     fn test_alu_lsr_by_more_than_32() {
         let mut cpsr = ProgramStatusRegister::default();
         let number = 1 << 31;
-        let result = Alu::exec_shift(
+        let alu = Alu::new();
+        let result = alu.exec_shift(
             number,
             ShiftType::LogicalRight,
             33,
@@ -454,7 +466,8 @@ mod tests {
     fn test_alu_asr_by_32() {
         let mut cpsr = ProgramStatusRegister::default();
         let number = 1 << 31;
-        let result = Alu::exec_shift(
+        let alu = Alu::new();
+        let result = alu.exec_shift(
             number,
             ShiftType::ArithmeticRight,
             0,
@@ -469,7 +482,8 @@ mod tests {
     fn test_alu_ror_by_32() {
         let mut cpsr = ProgramStatusRegister::default();
         let number = 0xF0F0_F0F0;
-        let result = Alu::exec_shift(
+        let alu = Alu::new();
+        let result = alu.exec_shift(
             number,
             ShiftType::RotateRight,
             32,
@@ -487,7 +501,8 @@ mod tests {
         let mut cpsr = ProgramStatusRegister::default();
         let number = 0xF0F0_F0F1;
         let n = 33;
-        let result = Alu::exec_shift(
+        let alu = Alu::new();
+        let result = alu.exec_shift(
             number,
             ShiftType::RotateRight,
             n,
@@ -504,7 +519,8 @@ mod tests {
     fn test_alu_rrx() {
         let mut cpsr = ProgramStatusRegister::default().with_cbe_condition(true);
         let number = 0b11;
-        let result = Alu::exec_shift(
+        let alu = Alu::new();
+        let result = alu.exec_shift(
             number,
             ShiftType::RotateRight,
             0,

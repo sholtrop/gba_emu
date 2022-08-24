@@ -1,7 +1,8 @@
 use crate::alu::AluResult;
-use crate::bus::{Bus, HALFWORD, WORD};
+use crate::bus::{Bus, HALFWORD};
 use crate::cycles::Cycles;
 use crate::instruction;
+use crate::ram::IwRam;
 use crate::registers::psr::ProcessorMode::{self, *};
 use crate::{
     alu::{Alu, AluSetCpsr},
@@ -9,7 +10,6 @@ use crate::{
     memcontroller::MemoryController,
     registers::CpuRegisters,
 };
-use armv4t_decoder::arm::block_data_transfer::RegisterList;
 use armv4t_decoder::arm::data_processing::OpCode;
 use armv4t_decoder::arm::halfword_data_transfer::ShType;
 use armv4t_decoder::thumb::load_address::LoadSource;
@@ -57,6 +57,7 @@ pub struct Cpu {
     registers: CpuRegisters,
     mem_controller: MemoryController,
     // current_tick_cycles: Cycles,
+    alu: Alu,
     pipeline: CpuPipeline,
 }
 
@@ -69,6 +70,7 @@ impl Cpu {
             registers: CpuRegisters::new(pc),
             mem_controller: memory,
             // current_tick_cycles: Cycles(0),
+            alu: Alu::new(),
             pipeline: CpuPipeline {
                 decode: instruction::NOP_ARM,
                 execute: Armv4tInstruction::nop_arm(),
@@ -217,18 +219,10 @@ impl Cpu {
             SpRelativeLoadStore(op) => self.thumb_sp_relative_load_store(op),
             LoadAddress(op) => self.thumb_load_address(op),
             ConditionalBranch(op) => self.thumb_cond_branch(op),
-            LoadStoreImmOffset(op) => {
-                todo!()
-            }
-            LoadStoreRegOffset(op) => {
-                todo!()
-            }
-            LoadStoreSignExtHalfwordByte(op) => {
-                todo!()
-            }
-            PcRelativeLoad(op) => {
-                todo!()
-            }
+            LoadStoreImmOffset(op) => self.thumb_load_store_imm(op),
+            LoadStoreRegOffset(op) => self.thumb_load_store_reg(op),
+            LoadStoreSignExtHalfwordByte(op) => self.thumb_load_store_sign_ext_byte_halfword(op),
+            PcRelativeLoad(op) => self.thumb_pc_relative_load(op),
             HiRegOpsBranchExchange(op) => {
                 todo!()
             }
@@ -250,7 +244,8 @@ impl Cpu {
         let sp = self.registers.read(STACK_POINTER);
         let op = if offset < 0 { OpCode::Sub } else { OpCode::Add };
         let AluResult { value, .. } =
-            Alu::exec_op(op, sp, offset as u32, AluSetCpsr::Preserve(cpsr));
+            self.alu
+                .exec_op(op, sp, offset as u32, AluSetCpsr::Preserve(cpsr));
         self.registers.write(STACK_POINTER, value);
         // TODO: Cycles should be same as arm::data_processing of the equivalent instruction
         Cycles(1)
@@ -357,7 +352,7 @@ impl Cpu {
             .with_load_store(op.load_or_store())
             .with_is_imm_offset(true)
             .with_imm_offset(op.offset())
-            .with_sh_type(UnsignedHalfwords)
+            .with_sh_type(UnsignedHalfword)
             .with_up_or_down(UpOrDown::Up)
             .with_pre_post_indexing(PreOrPostIndexing::Pre)
             .with_write_back(false);
@@ -419,6 +414,126 @@ impl Cpu {
         } else {
             Cycles(1)
         }
+    }
+
+    fn thumb_load_store_imm(&mut self, op: thumb::load_store_imm_offset::Op) -> Cycles {
+        let arm_op = arm::single_data_transfer::Op::new()
+            .with_base_reg(op.base_reg().into())
+            .with_byte_or_word(op.byte_or_word())
+            .with_load_store(op.load_or_store())
+            .with_dest_reg(op.dest_reg().into())
+            .with_is_reg_offset(false)
+            .with_offset((op.offset() as u16).into())
+            .with_pre_post_indexing(PreOrPostIndexing::Pre)
+            .with_up_or_down(UpOrDown::Up);
+
+        self.arm_single_data_transfer(arm_op)
+    }
+
+    fn thumb_load_store_reg(&mut self, op: thumb::load_store_reg_offset::Op) -> Cycles {
+        let arm_op = arm::single_data_transfer::Op::new()
+            .with_base_reg(op.base_reg().into())
+            .with_byte_or_word(op.byte_or_word())
+            .with_load_store(op.load_or_store())
+            .with_dest_reg(op.dest_reg().into())
+            .with_is_reg_offset(true)
+            .with_offset(RegisterName::from(op.offset_reg()).into())
+            .with_pre_post_indexing(PreOrPostIndexing::Pre)
+            .with_up_or_down(UpOrDown::Up);
+
+        self.arm_single_data_transfer(arm_op)
+    }
+
+    fn thumb_load_store_sign_ext_byte_halfword(
+        &mut self,
+        op: thumb::load_store_sign_ext_byte_halfword::Op,
+    ) -> Cycles {
+        let (load_or_store, sh_type) = match (op.sign_extend(), op.h_flag()) {
+            (false, false) => (LoadOrStore::Store, ShType::UnsignedHalfword),
+            (false, true) => (LoadOrStore::Load, ShType::UnsignedHalfword),
+            (true, false) => (LoadOrStore::Load, ShType::SignedByte),
+            (true, true) => (LoadOrStore::Load, ShType::SignedHalfword),
+        };
+        let arm_op = arm::halfword_data_transfer::Op::new()
+            .with_base_reg(op.base_reg().into())
+            .with_is_imm_offset(false)
+            .with_load_store(load_or_store)
+            .with_reg_offset(op.offset_reg().into())
+            .with_pre_post_indexing(PreOrPostIndexing::Pre)
+            .with_up_or_down(UpOrDown::Up)
+            .with_sh_type(sh_type)
+            .with_write_back(false);
+
+        self.arm_halfword_data_transfer(arm_op)
+    }
+
+    fn thumb_pc_relative_load(&mut self, op: thumb::pc_relative_load::Op) -> Cycles {
+        let arm_op = arm::single_data_transfer::Op::new()
+            .with_base_reg(PROGRAM_COUNTER)
+            .with_dest_reg(op.dest_reg().into())
+            .with_load_store(LoadOrStore::Load)
+            .with_is_reg_offset(false)
+            .with_offset(op.word8().value().into())
+            .with_pre_post_indexing(PreOrPostIndexing::Pre)
+            .with_up_or_down(UpOrDown::Up)
+            .with_byte_or_word(ByteOrWord::Word);
+
+        self.arm_single_data_transfer(arm_op)
+    }
+
+    fn thumb_hi_regops_branch_exchange(
+        &mut self,
+        op: thumb::hi_reg_ops_branch_exchange::Op,
+    ) -> Cycles {
+        use thumb::hi_reg_ops_branch_exchange::OpCode::*;
+
+        let src_reg = if op.hi_op1() {
+            op.src_reg().into_hi_reg()
+        } else {
+            op.src_reg().into()
+        };
+        let dest_reg = if op.hi_op2() {
+            op.dest_reg().into_hi_reg()
+        } else {
+            op.dest_reg().into()
+        };
+        let lhs = self.registers.read(src_reg);
+        let rhs = self.registers.read(dest_reg);
+        let cpsr = self.registers.get_cpsr_mut();
+
+        // TODO: Rethink cycle counting?
+        let cycles: Cycles;
+        let AluResult { value, write_back } = match op.opcode() {
+            Add => {
+                cycles = Cycles(0);
+                self.alu
+                    .exec_op(OpCode::Add, lhs, rhs, AluSetCpsr::Preserve(cpsr))
+            }
+            Cmp => {
+                cycles = Cycles(0);
+                self.alu
+                    .exec_op(OpCode::Cmp, lhs, rhs, AluSetCpsr::Alter(cpsr))
+            }
+            Mov => {
+                cycles = Cycles(0);
+                self.alu
+                    .exec_op(OpCode::Mov, lhs, rhs, AluSetCpsr::Preserve(cpsr))
+            }
+            Bx => {
+                cycles = self
+                    .arm_branch_and_exchange(arm::branch_and_exchange::Op::new().with_rn(src_reg));
+                AluResult {
+                    value: 0,
+                    write_back: false,
+                }
+            }
+        };
+
+        if write_back {
+            self.registers.write(dest_reg, value);
+        }
+
+        cycles
     }
 
     fn arm_branch_and_exchange(&mut self, op: branch_and_exchange::Op) -> Cycles {
@@ -542,7 +657,7 @@ impl Cpu {
             };
             let sh_type = offset_reg.shift_type();
             let cpsr = self.registers.get_cpsr_mut();
-            Alu::exec_shift(
+            self.alu.exec_shift(
                 offset_amount,
                 sh_type,
                 shift_amount,
@@ -626,10 +741,11 @@ impl Cpu {
 
         let result = if op.set_cond() {
             let cpsr = self.registers.get_cpsr_mut();
-            Alu::exec_op(opcode, lhs, rhs, AluSetCpsr::Alter(cpsr))
+            self.alu.exec_op(opcode, lhs, rhs, AluSetCpsr::Alter(cpsr))
         } else {
             let cpsr = self.registers.get_cpsr();
-            Alu::exec_op(opcode, lhs, rhs, AluSetCpsr::Preserve(cpsr))
+            self.alu
+                .exec_op(opcode, lhs, rhs, AluSetCpsr::Preserve(cpsr))
         };
 
         if result.write_back {
@@ -732,7 +848,7 @@ impl Cpu {
             AluSetCpsr::Preserve(self.registers.get_cpsr())
         };
 
-        let result = Alu::exec_mul(lhs, rhs, acc, cpsr);
+        let result = self.alu.exec_mul(lhs, rhs, acc, cpsr);
         let dst = op.reg_dest();
         self.registers.write(dst, result);
 
@@ -768,7 +884,7 @@ impl Cpu {
             AluSetCpsr::Preserve(self.registers.get_cpsr())
         };
 
-        let (res_hi, res_lo) = Alu::exec_mul_long(lhs, rhs, acc, cpsr, sign);
+        let (res_hi, res_lo) = self.alu.exec_mul_long(lhs, rhs, acc, cpsr, sign);
 
         self.registers.write(dst_hi, res_hi);
         self.registers.write(dst_lo, res_lo);
@@ -812,13 +928,13 @@ impl Cpu {
                 self.registers.write(op.reg_dest(), val as u32);
                 cycles
             }
-            (Load, SignedHalfwords) => {
+            (Load, SignedHalfword) => {
                 let (val, cycles) = self.mem_controller.read_le_halfword(addr);
                 let val = val as i16 as i32;
                 self.registers.write(op.reg_dest(), val as u32);
                 cycles
             }
-            (Load, UnsignedHalfwords) => {
+            (Load, UnsignedHalfword) => {
                 let (val, cycles) = self.mem_controller.read_le_halfword(addr);
                 self.registers.write(op.reg_dest(), val as u32);
                 cycles
@@ -858,7 +974,7 @@ impl Cpu {
         };
         let sh_type = sh_reg.shift_type();
         let cpsr = self.registers.get_cpsr_mut();
-        Alu::exec_shift(
+        self.alu.exec_shift(
             offset_amount,
             sh_type,
             shift_amount,
